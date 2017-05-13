@@ -12,13 +12,15 @@ mod secapi;
 
 use widestring::WideString;
 use secapi::{PACE_HEADER, PACCESS_ALLOWED_ACE, PACCESS_DENIED_ACE, ACCESS_ALLOWED_ACE,
-             ACCESS_DENIED_ACE};
+             ACCESS_DENIED_ACE, PACL_SIZE_INFORMATION};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID};
 use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 use std::iter::once;
+
+#[allow(unused_imports)]
 use field_offset::*;
 
 use std::env::args;
@@ -51,7 +53,7 @@ fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
     Ok(out.to_string_lossy())
 }
 
-fn get_acl_entries(path: &String) -> Result<Vec<AccessControlEntry>, DWORD> {
+fn get_security_descriptor(path: &str) -> Result<Vec<u8>, DWORD> {
     let wPath: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
     let mut bufSize: DWORD = 0;
     let mut status = unsafe {
@@ -78,18 +80,24 @@ fn get_acl_entries(path: &String) -> Result<Vec<AccessControlEntry>, DWORD> {
         return Err(unsafe { kernel32::GetLastError() });
     }
 
+    Ok(securityDesc)
+}
+
+fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
+    let securityDesc = get_security_descriptor(path)?;
+
     let mut pDacl: PACL = 0 as PACL;
     let mut daclPresent: BOOL = 0;
     let mut daclDefault: BOOL = 0;
 
-    status = unsafe {
+    let status = unsafe {
         secapi::GetSecurityDescriptorDacl(securityDesc.as_ptr() as PSECURITY_DESCRIPTOR,
                                           &mut daclPresent,
                                           &mut pDacl,
                                           &mut daclDefault)
     };
 
-    if status == 0 {
+    if status == 0 || daclPresent == 0 {
         return Err(unsafe { kernel32::GetLastError() });
     }
 
@@ -130,7 +138,7 @@ fn get_acl_entries(path: &String) -> Result<Vec<AccessControlEntry>, DWORD> {
 }
 
 fn main() {
-    let results = get_acl_entries(&String::from("C:\\tools\\HxD.exe")).unwrap();
+    let results = get_acl_entries("C:\\tools\\HxD.exe").unwrap();
     for item in results {
         match item.entryType {
             AccessControlEntryType::AccessAllowed => {

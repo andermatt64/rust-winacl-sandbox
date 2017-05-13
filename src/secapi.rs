@@ -48,9 +48,16 @@ STRUCT!{struct ACCESS_DENIED_ACE {
     SidStart: DWORD,
 }}
 
+STRUCT!{struct ACL_SIZE_INFORMATION {
+    AceCount: DWORD,
+    AclBytesInUse: DWORD,
+    AclBytesFree: DWORD,
+}}
+
 pub type PACE_HEADER = *mut ACE_HEADER;
 pub type PACCESS_ALLOWED_ACE = *mut ACCESS_ALLOWED_ACE;
 pub type PACCESS_DENIED_ACE = *mut ACCESS_DENIED_ACE;
+pub type PACL_SIZE_INFORMATION = *mut ACL_SIZE_INFORMATION;
 
 #[link(name = "advapi32")]
 extern "system" {
@@ -76,9 +83,26 @@ extern "system" {
     pub fn InitializeAcl(pAcl: PACL, nAclLength: DWORD, dwAclRevision: DWORD) -> BOOL;
     pub fn GetAce(pAcl: PACL, dwAceIndex: DWORD, pAce: *mut PACE_HEADER) -> BOOL;
     pub fn ConvertSidToStringSidW(Sid: PSID, StringSid: *mut LPWSTR) -> BOOL;
-    pub fn EqualSid();
-    pub fn AddAce();
-    pub fn AddAccessAllowedAce();
-    pub fn SetSecurityDescriptorDacl();
-    pub fn SetFileSecurity();
+    pub fn ConvertStringSidToSidW(StringSid: LPCWSTR, Sid: *mut PSID) -> BOOL;
+    pub fn EqualSid(pSid1: PSID, pSid2: PSID) -> BOOL;
+    pub fn AddAce(pAcl: PACL,
+                  dwAcerevision: DWORD,
+                  dwStartingAceIndex: DWORD,
+                  pAceList: LPVOID,
+                  nAceListLength: DWORD)
+                  -> BOOL;
+    pub fn AddAccessAllowedAce(pAcl: PACL,
+                               dwAceRevision: DWORD,
+                               AccessMask: DWORD,
+                               pSid: PSID)
+                               -> BOOL;
+    pub fn SetSecurityDescriptorDacl(pSecurityDescriptor: PSECURITY_DESCRIPTOR,
+                                     bDaclPresent: BOOL,
+                                     pDacl: PACL,
+                                     pDaclDefaulted: BOOL)
+                                     -> BOOL;
+    pub fn SetFileSecurityW(lpFileName: LPCWSTR,
+                            SecurityInformation: SECURITY_INFORMATION,
+                            pSecurityDescriptor: PSECURITY_DESCRIPTOR)
+                            -> BOOL;
 }
