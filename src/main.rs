@@ -25,13 +25,8 @@ use field_offset::*;
 
 use std::env::args;
 
-enum AccessControlEntryType {
-    AccessAllowed = 0,
-    AccessDenied,
-}
-
 struct AccessControlEntry {
-    entryType: AccessControlEntryType,
+    entryType: u8,
     flags: u8,
     mask: u32,
     sid: String,
@@ -83,6 +78,21 @@ fn get_security_descriptor(path: &str) -> Result<Vec<u8>, DWORD> {
     Ok(securityDesc)
 }
 
+macro_rules! get_entry {
+    ($x: ident => $y: path) => {
+        {
+            let entry: *mut $y = $x as *mut $y;
+            let pSid = offset_of!($y => SidStart);
+            AccessControlEntry {
+                entryType: unsafe { (*$x).AceType },
+                flags: unsafe { (*$x).AceFlags },
+                mask: unsafe { (*entry).Mask},
+                sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
+            }
+        }
+    };
+}
+
 fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
     let securityDesc = get_security_descriptor(path)?;
 
@@ -110,26 +120,8 @@ fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
         }
 
         match unsafe { (*hdr).AceType } {
-            0 => {
-                let entry: PACCESS_ALLOWED_ACE = hdr as PACCESS_ALLOWED_ACE;
-                let pSid = offset_of!(ACCESS_ALLOWED_ACE => SidStart);
-                entries.push(AccessControlEntry {
-                                 entryType: AccessControlEntryType::AccessAllowed,
-                                 flags: unsafe { (*hdr).AceFlags },
-                                 mask: unsafe { (*entry).Mask },
-                                 sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
-                             })
-            }
-            1 => {
-                let entry: PACCESS_DENIED_ACE = hdr as PACCESS_DENIED_ACE;
-                let pSid = offset_of!(ACCESS_DENIED_ACE => SidStart);
-                entries.push(AccessControlEntry {
-                                 entryType: AccessControlEntryType::AccessDenied,
-                                 flags: unsafe { (*hdr).AceFlags },
-                                 mask: unsafe { (*entry).Mask },
-                                 sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
-                             })
-            }
+            0 => entries.push(get_entry!(hdr => ACCESS_ALLOWED_ACE)),
+            1 => entries.push(get_entry!(hdr => ACCESS_DENIED_ACE)),
             _ => continue,
         }
     }
@@ -141,18 +133,19 @@ fn main() {
     let results = get_acl_entries("C:\\tools\\HxD.exe").unwrap();
     for item in results {
         match item.entryType {
-            AccessControlEntryType::AccessAllowed => {
+            0 => {
                 println!("Type=AccessAllowed Flags={:08x} Mask={:08x} Sid={:}",
                          item.flags,
                          item.mask,
                          item.sid);
             }
-            AccessControlEntryType::AccessDenied => {
+            1 => {
                 println!("Type=AccessDenied Flags={:08x} Mask={:08x} Sid={:}",
                          item.flags,
                          item.mask,
                          item.sid);
             }
+            _ => {}
         }
     }
 }
