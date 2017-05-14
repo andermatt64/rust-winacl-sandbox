@@ -6,7 +6,7 @@ extern crate winapi;
 
 use self::winapi::*;
 
-macro_rules! STRUCT {
+macro_rules! DEF_STRUCT {
     {$(#[$attrs:meta])* nodebug struct $name:ident { $($field:ident: $ftype:ty,)+ }} => {
         #[repr(C)] $(#[$attrs])*
         pub struct $name {
@@ -25,30 +25,54 @@ macro_rules! STRUCT {
     };
 }
 
-ENUM!{enum ACL_INFORMATION_CLASS {
+macro_rules! DEF_ENUM {
+    {enum $name:ident { $($variant:ident = $value:expr,)+ }} => {
+        pub type $name = u32;
+        $(pub const $variant: $name = $value;)+
+    };
+    {enum $name:ident { $variant:ident = $value:expr, $($rest:tt)* }} => {
+        pub type $name = u32;
+        pub const $variant: $name = $value;
+        DEF_ENUM!{@gen $name $variant, $($rest)*}
+    };
+    {enum $name:ident { $variant:ident, $($rest:tt)* }} => {
+        DEF_ENUM!{enum $name { $variant = 0, $($rest)* }}
+    };
+    {@gen $name:ident $base:ident,} => {};
+    {@gen $name:ident $base:ident, $variant:ident = $value:expr, $($rest:tt)*} => {
+        pub const $variant: $name = $value;
+        DEF_ENUM!{@gen $name $variant, $($rest)*}
+    };
+    {@gen $name:ident $base:ident, $variant:ident, $($rest:tt)*} => {
+        pub const $variant: $name = $base + 1u32;
+        DEF_ENUM!{@gen $name $variant, $($rest)*}
+    };
+}
+
+DEF_ENUM!{enum ACL_INFORMATION_CLASS {
     AclRevisionInformation = 1,
     AclSizeInformation,
 }}
 
-STRUCT!{struct ACE_HEADER {
+DEF_STRUCT!{struct ACE_HEADER {
     AceType: BYTE,
     AceFlags: BYTE,
     AceSize: WORD,
 }}
 
-STRUCT!{struct ACCESS_ALLOWED_ACE {
+DEF_STRUCT!{struct ACCESS_ALLOWED_ACE {
     Header: ACE_HEADER,
     Mask: ACCESS_MASK,
     SidStart: DWORD,
 }}
 
-STRUCT!{struct ACCESS_DENIED_ACE {
+DEF_STRUCT!{struct ACCESS_DENIED_ACE {
     Header: ACE_HEADER,
     Mask: ACCESS_MASK,
     SidStart: DWORD,
 }}
 
-STRUCT!{struct ACL_SIZE_INFORMATION {
+DEF_STRUCT!{struct ACL_SIZE_INFORMATION {
     AceCount: DWORD,
     AclBytesInUse: DWORD,
     AclBytesFree: DWORD,

@@ -11,8 +11,7 @@ extern crate widestring;
 mod secapi;
 
 use widestring::WideString;
-use secapi::{PACE_HEADER, PACCESS_ALLOWED_ACE, PACCESS_DENIED_ACE, ACCESS_ALLOWED_ACE,
-             ACCESS_DENIED_ACE, PACL_SIZE_INFORMATION};
+use secapi::{PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID};
 use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL};
 use std::ffi::OsStr;
@@ -23,12 +22,11 @@ use std::iter::once;
 #[allow(unused_imports)]
 use field_offset::*;
 
-use std::env::args;
-
 struct AccessControlEntry {
     entryType: u8,
     flags: u8,
     mask: u32,
+    size: u16,
     sid: String,
 }
 
@@ -87,6 +85,7 @@ macro_rules! get_entry {
                 entryType: unsafe { (*$x).AceType },
                 flags: unsafe { (*$x).AceFlags },
                 mask: unsafe { (*entry).Mask},
+                size: unsafe { (*$x).AceSize },
                 sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
             }
         }
@@ -134,13 +133,15 @@ fn main() {
     for item in results {
         match item.entryType {
             0 => {
-                println!("Type=AccessAllowed Flags={:08x} Mask={:08x} Sid={:}",
+                println!("Type=AccessAllowed Size={:04x} Flags={:08x} Mask={:08x} Sid={:}",
+                         item.size,
                          item.flags,
                          item.mask,
                          item.sid);
             }
             1 => {
-                println!("Type=AccessDenied Flags={:08x} Mask={:08x} Sid={:}",
+                println!("Type=AccessDenied  Size={:04x} Flags={:08x} Mask={:08x} Sid={:}",
+                         item.size,
                          item.flags,
                          item.mask,
                          item.sid);
