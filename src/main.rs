@@ -18,6 +18,7 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 use std::iter::once;
+use std::process;
 
 #[allow(unused_imports)]
 use field_offset::*;
@@ -46,7 +47,7 @@ fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
     Ok(out.to_string_lossy())
 }
 
-fn get_security_descriptor(path: &str) -> Result<Vec<u8>, DWORD> {
+fn get_dacl(path: &str) -> Result<(Vec<u8>, PACL), DWORD> {
     let wPath: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
     let mut bufSize: DWORD = 0;
     let mut status = unsafe {
@@ -73,28 +74,6 @@ fn get_security_descriptor(path: &str) -> Result<Vec<u8>, DWORD> {
         return Err(unsafe { kernel32::GetLastError() });
     }
 
-    Ok(securityDesc)
-}
-
-macro_rules! get_entry {
-    ($x: ident => $y: path) => {
-        {
-            let entry: *mut $y = $x as *mut $y;
-            let pSid = offset_of!($y => SidStart);
-            AccessControlEntry {
-                entryType: unsafe { (*$x).AceType },
-                flags: unsafe { (*$x).AceFlags },
-                mask: unsafe { (*entry).Mask},
-                size: unsafe { (*$x).AceSize },
-                sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
-            }
-        }
-    };
-}
-
-fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
-    let securityDesc = get_security_descriptor(path)?;
-
     let mut pDacl: PACL = 0 as PACL;
     let mut daclPresent: BOOL = 0;
     let mut daclDefault: BOOL = 0;
@@ -110,6 +89,28 @@ fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
         return Err(unsafe { kernel32::GetLastError() });
     }
 
+    Ok((securityDesc, pDacl))
+}
+
+macro_rules! add_entry {
+    ($z: ident, $x: ident => $y: path) => {
+        {
+            let entry: *mut $y = $x as *mut $y;
+            let pSid = offset_of!($y => SidStart);
+            $z.push(AccessControlEntry {
+                entryType: unsafe { (*$x).AceType },
+                flags: unsafe { (*$x).AceFlags },
+                mask: unsafe { (*entry).Mask},
+                size: unsafe { (*$x).AceSize },
+                sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
+            })
+        }
+    };
+}
+
+fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
+    let (securityDesc, pDacl) = get_dacl(path)?;
+
     let mut hdr: PACE_HEADER = 0 as PACE_HEADER;
     let mut entries: Vec<AccessControlEntry> = Vec::new();
 
@@ -119,8 +120,8 @@ fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
         }
 
         match unsafe { (*hdr).AceType } {
-            0 => entries.push(get_entry!(hdr => ACCESS_ALLOWED_ACE)),
-            1 => entries.push(get_entry!(hdr => ACCESS_DENIED_ACE)),
+            0 => add_entry!(entries, hdr => ACCESS_ALLOWED_ACE),
+            1 => add_entry!(entries, hdr => ACCESS_DENIED_ACE),
             _ => continue,
         }
     }
@@ -129,7 +130,14 @@ fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
 }
 
 fn main() {
-    let results = get_acl_entries("C:\\tools\\HxD.exe").unwrap();
+    let results = match get_acl_entries("C:\\tools\\HxD.exe") {
+        Ok(x) => x,
+        Err(x) => {
+            println!("Failed to get ACL entries: {:}", x);
+            process::exit(-1)
+        }
+    };
+
     for item in results {
         match item.entryType {
             0 => {
