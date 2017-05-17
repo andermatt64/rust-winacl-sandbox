@@ -162,14 +162,17 @@ impl SimpleDacl {
     }
 
     fn add_entry(&mut self, entry: AccessControlEntry) -> bool {
-        let mut target: usize = 0xffffffff;
+        let target: usize;
         match entry.entryType {
             0 => {
-                // We are assuming that the list is proper: that denied ACEs are placed prior to allow ACEs
-                for (i, item) in self.entries.iter().enumerate() {
-                    if item.entryType != 1 {
-                        target = i;
-                        break;
+                // We are assuming that the list is proper: that denied ACEs are placed
+                // prior to allow ACEs
+                match self.entries.iter().position(|&ref x| x.entryType != 1) {
+                    Some(x) => {
+                        target = x;
+                    }
+                    None => {
+                        target = 0xffffffff;
                     }
                 }
             }
