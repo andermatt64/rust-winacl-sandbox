@@ -11,14 +11,18 @@ extern crate widestring;
 mod secapi;
 
 use widestring::WideString;
-use secapi::{PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE};
-use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID};
+use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
+             SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION};
+use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
 use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 use std::iter::once;
 use std::process;
+use std::mem;
+use std::fs::File;
+use std::io::prelude::*;
 
 #[allow(unused_imports)]
 use field_offset::*;
@@ -27,8 +31,21 @@ struct AccessControlEntry {
     entryType: u8,
     flags: u8,
     mask: u32,
-    size: u16,
     sid: String,
+}
+
+fn string_to_sid(StringSid: &str) -> Result<PSID, DWORD> {
+    let mut pSid: PSID = 0 as PSID;
+    let wSid: Vec<u16> = OsStr::new(StringSid)
+        .encode_wide()
+        .chain(once(0))
+        .collect();
+
+    if unsafe { secapi::ConvertStringSidToSidW(wSid.as_ptr(), &mut pSid) } == 0 {
+        return Err(unsafe { kernel32::GetLastError() });
+    }
+
+    Ok(pSid)
 }
 
 fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
@@ -100,37 +117,183 @@ macro_rules! add_entry {
             $z.push(AccessControlEntry {
                 entryType: unsafe { (*$x).AceType },
                 flags: unsafe { (*$x).AceFlags },
-                mask: unsafe { (*entry).Mask},
-                size: unsafe { (*$x).AceSize },
+                mask: unsafe { (*entry).Mask },
                 sid: sid_to_string(pSid.apply_ptr_mut(entry) as PSID)?,
             })
         }
     };
 }
 
-fn get_acl_entries(path: &str) -> Result<Vec<AccessControlEntry>, DWORD> {
-    let (securityDesc, pDacl) = get_dacl(path)?;
+#[allow(dead_code)]
+struct SimpleDacl {
+    entries: Vec<AccessControlEntry>,
+}
 
-    let mut hdr: PACE_HEADER = 0 as PACE_HEADER;
-    let mut entries: Vec<AccessControlEntry> = Vec::new();
+#[allow(dead_code)]
+impl SimpleDacl {
+    fn new() -> SimpleDacl {
+        SimpleDacl { entries: Vec::new() }
+    }
 
-    for i in 0..unsafe { (*pDacl).AceCount } {
-        if unsafe { secapi::GetAce(pDacl, i as u32, &mut hdr) } == 0 {
+    fn from_path(path: &str) -> Result<SimpleDacl, DWORD> {
+        #[allow(unused_variables)]
+        let (securityDesc, pDacl) = get_dacl(path)?;
+
+        let mut hdr: PACE_HEADER = 0 as PACE_HEADER;
+        let mut entries: Vec<AccessControlEntry> = Vec::new();
+
+        for i in 0..unsafe { (*pDacl).AceCount } {
+            if unsafe { secapi::GetAce(pDacl, i as u32, &mut hdr) } == 0 {
+                return Err(unsafe { kernel32::GetLastError() });
+            }
+
+            match unsafe { (*hdr).AceType } {
+                0 => add_entry!(entries, hdr => ACCESS_ALLOWED_ACE),
+                1 => add_entry!(entries, hdr => ACCESS_DENIED_ACE),
+                _ => return Err(0xffffffff),
+            }
+        }
+
+        Ok(SimpleDacl { entries: entries })
+    }
+
+    fn get_entries(&self) -> &Vec<AccessControlEntry> {
+        &self.entries
+    }
+
+    fn add_entry(&mut self, entry: AccessControlEntry) -> bool {
+        let mut target: usize = 0xffffffff;
+        match entry.entryType {
+            0 => {
+                // We are assuming that the list is proper: that denied ACEs are placed prior to allow ACEs
+                for (i, item) in self.entries.iter().enumerate() {
+                    if item.entryType != 1 {
+                        target = i;
+                        break;
+                    }
+                }
+            }
+            1 => {
+                target = 0;
+            }
+            _ => return false,
+        }
+
+        match string_to_sid(&entry.sid) {
+            Err(_) => return false,
+            _ => {}
+        }
+
+        if target == 0xffffffff {
+            self.entries.push(entry)
+        } else {
+            self.entries.insert(target, entry)
+        }
+
+        true
+    }
+
+    fn apply_to_path(&self, path: &str) -> Result<usize, DWORD> {
+        let wPath: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
+        let mut securityDesc: Vec<u8> = Vec::with_capacity(SECURITY_DESCRIPTOR_MIN_LENGTH);
+
+        if unsafe {
+               secapi::InitializeSecurityDescriptor(securityDesc.as_mut_ptr() as LPVOID,
+                                                    SECURITY_DESCRIPTOR_REVISION)
+           } == 0 {
             return Err(unsafe { kernel32::GetLastError() });
         }
 
-        match unsafe { (*hdr).AceType } {
-            0 => add_entry!(entries, hdr => ACCESS_ALLOWED_ACE),
-            1 => add_entry!(entries, hdr => ACCESS_DENIED_ACE),
-            _ => continue,
-        }
-    }
+        let mut aclSize = mem::size_of::<ACL>();
+        for entry in &self.entries {
+            let pSid = string_to_sid(&entry.sid)?;
+            aclSize += unsafe { secapi::GetLengthSid(pSid) } as usize;
 
-    Ok(entries)
+            match entry.entryType {
+                0 => aclSize += mem::size_of::<ACCESS_ALLOWED_ACE>() - mem::size_of::<DWORD>(),
+                1 => aclSize += mem::size_of::<ACCESS_DENIED_ACE>() - mem::size_of::<DWORD>(),
+                _ => return Err(0xffffffff),
+            }
+        }
+
+        let mut aclBuffer: Vec<u8> = Vec::with_capacity(aclSize);
+        if unsafe {
+               secapi::InitializeAcl(aclBuffer.as_mut_ptr() as PACL,
+                                     aclSize as DWORD,
+                                     ACL_REVISION)
+           } == 0 {
+            return Err(unsafe { kernel32::GetLastError() });
+        }
+
+        for entry in &self.entries {
+            let pSid = string_to_sid(&entry.sid)?;
+
+            match entry.entryType {
+                0 => {
+                    if unsafe {
+                           secapi::AddAccessAllowedAce(aclBuffer.as_mut_ptr() as PACL,
+                                                       ACL_REVISION,
+                                                       entry.mask,
+                                                       pSid)
+                       } == 0 {
+                        return Err(unsafe { kernel32::GetLastError() });
+                    }
+                }
+                1 => {
+                    if unsafe {
+                           secapi::AddAccessDeniedAce(aclBuffer.as_mut_ptr() as PACL,
+                                                      ACL_REVISION,
+                                                      entry.mask,
+                                                      pSid)
+                       } == 0 {
+                        return Err(unsafe { kernel32::GetLastError() });
+                    }
+                }
+                _ => return Err(0xffffffff),
+            }
+        }
+
+        if unsafe {
+               secapi::SetSecurityDescriptorDacl(securityDesc.as_mut_ptr() as PSECURITY_DESCRIPTOR,
+                                                 1,
+                                                 aclBuffer.as_ptr() as PACL,
+                                                 0)
+           } == 0 {
+            return Err(unsafe { kernel32::GetLastError() });
+        }
+
+        if unsafe {
+               secapi::SetFileSecurityW(wPath.as_ptr(),
+                                        DACL_SECURITY_INFORMATION,
+                                        securityDesc.as_ptr() as PSECURITY_DESCRIPTOR)
+           } == 0 {
+            return Err(unsafe { kernel32::GetLastError() });
+        }
+
+        Ok(0)
+    }
 }
 
 fn main() {
-    let results = match get_acl_entries("C:\\tools\\HxD.exe") {
+    let mut newAcl = SimpleDacl::new();
+
+    let mut fd = match File::create("test.txt") {
+        Ok(x) => x,
+        _ => return,
+    };
+    {
+        fd.write_all(b"w00t").unwrap();
+    }
+
+    newAcl.add_entry(AccessControlEntry {
+                         sid: String::from("S-1-1-0"),
+                         mask: 0x001f01ff,
+                         entryType: 0,
+                         flags: 0,
+                     });
+    newAcl.apply_to_path("test.txt").unwrap();
+
+    let acl = match SimpleDacl::from_path("test.txt") {
         Ok(x) => x,
         Err(x) => {
             println!("Failed to get ACL entries: {:}", x);
@@ -138,18 +301,16 @@ fn main() {
         }
     };
 
-    for item in results {
+    for item in acl.get_entries() {
         match item.entryType {
             0 => {
-                println!("Type=AccessAllowed Size={:04x} Flags={:08x} Mask={:08x} Sid={:}",
-                         item.size,
+                println!("Type=AccessAllowed Flags={:08x} Mask={:08x} Sid={:}",
                          item.flags,
                          item.mask,
                          item.sid);
             }
             1 => {
-                println!("Type=AccessDenied  Size={:04x} Flags={:08x} Mask={:08x} Sid={:}",
-                         item.size,
+                println!("Type=AccessDenied  Flags={:08x} Mask={:08x} Sid={:}",
                          item.flags,
                          item.mask,
                          item.sid);

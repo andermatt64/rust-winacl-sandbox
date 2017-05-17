@@ -6,6 +6,10 @@ extern crate winapi;
 
 use self::winapi::*;
 
+pub const SECURITY_DESCRIPTOR_MIN_LENGTH: usize = 64;
+pub const SECURITY_DESCRIPTOR_REVISION: DWORD = 1;
+pub const ACL_REVISION: DWORD = 2;
+
 macro_rules! DEF_STRUCT {
     {$(#[$attrs:meta])* nodebug struct $name:ident { $($field:ident: $ftype:ty,)+ }} => {
         #[repr(C)] $(#[$attrs])*
@@ -120,6 +124,11 @@ extern "system" {
                                AccessMask: DWORD,
                                pSid: PSID)
                                -> BOOL;
+    pub fn AddAccessDeniedAce(pAcl: PACL,
+                              dwAceRevision: DWORD,
+                              AccessMask: DWORD,
+                              pSid: PSID)
+                              -> BOOL;
     pub fn SetSecurityDescriptorDacl(pSecurityDescriptor: PSECURITY_DESCRIPTOR,
                                      bDaclPresent: BOOL,
                                      pDacl: PACL,
@@ -129,4 +138,5 @@ extern "system" {
                             SecurityInformation: SECURITY_INFORMATION,
                             pSecurityDescriptor: PSECURITY_DESCRIPTOR)
                             -> BOOL;
+    pub fn GetLengthSid(pSid: PSID) -> DWORD;
 }
