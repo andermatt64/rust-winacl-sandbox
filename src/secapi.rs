@@ -139,4 +139,20 @@ extern "system" {
                             pSecurityDescriptor: PSECURITY_DESCRIPTOR)
                             -> BOOL;
     pub fn GetLengthSid(pSid: PSID) -> DWORD;
+    pub fn FreeSid(pSid: PSID) -> PVOID;
+}
+
+#[link(name = "userenv")]
+extern "system" {
+    pub fn CreateAppContainerProfile(pszAppContainerName: PCWSTR,
+                                     pszDisplayName: PCWSTR,
+                                     pszDescription: PCWSTR,
+                                     pCapabilities: PSID_AND_ATTRIBUTES,
+                                     dwCapabilityCount: DWORD,
+                                     ppSidAppContainerSid: *mut PSID)
+                                     -> HRESULT;
+    pub fn DeriveAppContainerSidFromAppContainerName(pszAppContainerName: PCWSTR,
+                                                     ppsidAppContainerSid: *mut PSID)
+                                                     -> HRESULT;
+    pub fn DeleteAppContainerProfile(pszAppContainerName: PCWSTR) -> HRESULT;
 }

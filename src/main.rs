@@ -14,7 +14,7 @@ use widestring::WideString;
 use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
              SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
-use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL};
+use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -23,6 +23,7 @@ use std::process;
 use std::mem;
 use std::fs::File;
 use std::io::prelude::*;
+use std::path::Path;
 
 #[allow(unused_imports)]
 use field_offset::*;
@@ -34,7 +35,21 @@ struct AccessControlEntry {
     sid: String,
 }
 
-fn string_to_sid(StringSid: &str) -> Result<PSID, DWORD> {
+struct SidPtr {
+    raw_ptr: PSID,
+}
+
+impl Drop for SidPtr {
+    fn drop(&mut self) {
+        if self.raw_ptr != (0 as PSID) {
+            unsafe {
+                secapi::FreeSid(self.raw_ptr);
+            }
+        }
+    }
+}
+
+fn string_to_sid(StringSid: &str) -> Result<SidPtr, DWORD> {
     let mut pSid: PSID = 0 as PSID;
     let wSid: Vec<u16> = OsStr::new(StringSid)
         .encode_wide()
@@ -45,7 +60,7 @@ fn string_to_sid(StringSid: &str) -> Result<PSID, DWORD> {
         return Err(unsafe { kernel32::GetLastError() });
     }
 
-    Ok(pSid)
+    Ok(SidPtr { raw_ptr: pSid })
 }
 
 fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
@@ -184,7 +199,7 @@ impl SimpleDacl {
 
         match string_to_sid(&entry.sid) {
             Err(_) => return false,
-            _ => {}
+            Ok(_) => {}
         }
 
         if target == 0xffffffff {
@@ -209,8 +224,8 @@ impl SimpleDacl {
 
         let mut aclSize = mem::size_of::<ACL>();
         for entry in &self.entries {
-            let pSid = string_to_sid(&entry.sid)?;
-            aclSize += unsafe { secapi::GetLengthSid(pSid) } as usize;
+            let sid = string_to_sid(&entry.sid)?;
+            aclSize += unsafe { secapi::GetLengthSid(sid.raw_ptr) } as usize;
 
             match entry.entryType {
                 0 => aclSize += mem::size_of::<ACCESS_ALLOWED_ACE>() - mem::size_of::<DWORD>(),
@@ -229,7 +244,7 @@ impl SimpleDacl {
         }
 
         for entry in &self.entries {
-            let pSid = string_to_sid(&entry.sid)?;
+            let sid = string_to_sid(&entry.sid)?;
 
             match entry.entryType {
                 0 => {
@@ -237,7 +252,7 @@ impl SimpleDacl {
                            secapi::AddAccessAllowedAce(aclBuffer.as_mut_ptr() as PACL,
                                                        ACL_REVISION,
                                                        entry.mask,
-                                                       pSid)
+                                                       sid.raw_ptr)
                        } == 0 {
                         return Err(unsafe { kernel32::GetLastError() });
                     }
@@ -247,7 +262,7 @@ impl SimpleDacl {
                            secapi::AddAccessDeniedAce(aclBuffer.as_mut_ptr() as PACL,
                                                       ACL_REVISION,
                                                       entry.mask,
-                                                      pSid)
+                                                      sid.raw_ptr)
                        } == 0 {
                         return Err(unsafe { kernel32::GetLastError() });
                     }
@@ -275,6 +290,37 @@ impl SimpleDacl {
 
         Ok(0)
     }
+}
+
+struct AppContainerProfile {
+    childPath: String,
+    outboundNetwork: bool,
+    debug: bool,
+    sid: PSID,
+}
+
+impl AppContainerProfile {
+    fn new(path: &str) -> AppContainerProfile {
+        let mut pSid: PSID = 0 as PSID;
+        let pathObj = Path::new(path);
+
+        AppContainerProfile {
+            childPath: path.to_string(),
+            outboundNetwork: true,
+            debug: false,
+            sid: pSid,
+        }
+    }
+
+    fn enable_outbound_network(&mut self, has_outbound_network: bool) {
+        self.outboundNetwork = has_outbound_network;
+    }
+
+    fn enable_debug(&mut self, is_debug: bool) {
+        self.debug = is_debug;
+    }
+
+    fn launch(&self, client: SOCKET) {}
 }
 
 fn main() {
