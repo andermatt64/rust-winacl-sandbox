@@ -28,6 +28,8 @@ use std::path::Path;
 #[allow(unused_imports)]
 use field_offset::*;
 
+pub const DEFAULT_PROFILE_NAME: &'static str = "appjaillauncher_default";
+
 struct AccessControlEntry {
     entryType: u8,
     flags: u8,
@@ -302,7 +304,13 @@ struct AppContainerProfile {
 impl AppContainerProfile {
     fn new(path: &str) -> AppContainerProfile {
         let mut pSid: PSID = 0 as PSID;
-        let pathObj = Path::new(path);
+        let stem = match Path::new(path).file_stem() {
+            Some(x) => x,
+            _ => OsStr::new(DEFAULT_PROFILE_NAME),
+        };
+
+        // TODO: CreateAppContainerProfile
+        // TODO: if ERROR_ALREADY_EXISTS, DeriveAppContainerSidFromAppContainerName
 
         AppContainerProfile {
             childPath: path.to_string(),
@@ -367,4 +375,6 @@ fn main() {
             _ => {}
         }
     }
+
+    let profile = AppContainerProfile::new("C:\\blah\\cool.exe");
 }
