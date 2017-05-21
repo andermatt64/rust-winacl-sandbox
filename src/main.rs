@@ -14,7 +14,8 @@ use widestring::WideString;
 use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
              SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
-use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET};
+use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET, PCWSTR, PSID_AND_ATTRIBUTES,
+             SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -295,6 +296,7 @@ impl SimpleDacl {
 }
 
 struct AppContainerProfile {
+    profile: String,
     childPath: String,
     outboundNetwork: bool,
     debug: bool,
@@ -302,17 +304,29 @@ struct AppContainerProfile {
 }
 
 impl AppContainerProfile {
-    fn new(path: &str) -> AppContainerProfile {
+    fn new(profile: &str, path: &str) -> AppContainerProfile {
         let mut pSid: PSID = 0 as PSID;
-        let stem = match Path::new(path).file_stem() {
-            Some(x) => x,
-            _ => OsStr::new(DEFAULT_PROFILE_NAME),
-        };
+        let profile_name: Vec<u16> = OsStr::new(profile)
+            .encode_wide()
+            .chain(once(0))
+            .collect();
 
         // TODO: CreateAppContainerProfile
+        let mut hr = unsafe {
+            secapi::CreateAppContainerProfile(profile_name.as_ptr(),
+                                              profile_name.as_ptr(),
+                                              profile_name.as_ptr(),
+                                              0 as PSID_AND_ATTRIBUTES,
+                                              0 as DWORD,
+                                              &mut pSid)
+        };
+
+        if hr == (ERROR_SUCCESS as HRESULT) {}
+        println!("hr = {:08x}", hr);
         // TODO: if ERROR_ALREADY_EXISTS, DeriveAppContainerSidFromAppContainerName
 
         AppContainerProfile {
+            profile: profile.to_string(),
             childPath: path.to_string(),
             outboundNetwork: true,
             debug: false,
@@ -376,5 +390,5 @@ fn main() {
         }
     }
 
-    let profile = AppContainerProfile::new("C:\\blah\\cool.exe");
+    let profile = AppContainerProfile::new("default_profile_appjail", "C:\\blah\\cool.exe");
 }
