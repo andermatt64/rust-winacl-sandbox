@@ -12,7 +12,7 @@ mod secapi;
 
 use widestring::WideString;
 use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
-             SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION};
+             SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION, HRESULT_FROM_WIN32};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
 use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET, PCWSTR, PSID_AND_ATTRIBUTES,
              SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT};
@@ -300,18 +300,17 @@ struct AppContainerProfile {
     childPath: String,
     outboundNetwork: bool,
     debug: bool,
-    sid: PSID,
+    sid: SidPtr,
 }
 
 impl AppContainerProfile {
-    fn new(profile: &str, path: &str) -> AppContainerProfile {
+    fn new(profile: &str, path: &str) -> Result<AppContainerProfile, HRESULT> {
         let mut pSid: PSID = 0 as PSID;
         let profile_name: Vec<u16> = OsStr::new(profile)
             .encode_wide()
             .chain(once(0))
             .collect();
 
-        // TODO: CreateAppContainerProfile
         let mut hr = unsafe {
             secapi::CreateAppContainerProfile(profile_name.as_ptr(),
                                               profile_name.as_ptr(),
@@ -321,17 +320,27 @@ impl AppContainerProfile {
                                               &mut pSid)
         };
 
-        if hr == (ERROR_SUCCESS as HRESULT) {}
-        println!("hr = {:08x}", hr);
-        // TODO: if ERROR_ALREADY_EXISTS, DeriveAppContainerSidFromAppContainerName
-
-        AppContainerProfile {
-            profile: profile.to_string(),
-            childPath: path.to_string(),
-            outboundNetwork: true,
-            debug: false,
-            sid: pSid,
+        if hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) {
+            hr = unsafe {
+                secapi::DeriveAppContainerSidFromAppContainerName(profile_name.as_ptr(), &mut pSid)
+            };
+            if hr != (ERROR_SUCCESS as HRESULT) {
+                return Err(hr);
+            }
         }
+
+        Ok(AppContainerProfile {
+               profile: profile.to_string(),
+               childPath: path.to_string(),
+               outboundNetwork: true,
+               debug: false,
+               sid: SidPtr { raw_ptr: pSid },
+           })
+    }
+
+    fn remove(profile: &str) -> bool {
+        // TODO: DeriveAppContainerSidFromAppContainerName to verify profile exists
+        // TODO: DeleteAppContainerProfile to delete profile
     }
 
     fn enable_outbound_network(&mut self, has_outbound_network: bool) {
@@ -342,7 +351,13 @@ impl AppContainerProfile {
         self.debug = is_debug;
     }
 
-    fn launch(&self, client: SOCKET) {}
+    fn launch(&self, client: SOCKET) {
+        // TODO: If outbound network is enabled, create capabilities list structure
+        // TODO: If not debug, set up security capabilities threat attribute
+        // TODO: Setup STARTUPINFO/STARTUPINFOEX
+        // TODO: Make sure dwCreationFlags has the right flags (EXTENDED_STARTUPINFO_PRESENT for non-debug)
+        // TODO: CreateProcess
+    }
 }
 
 fn main() {
