@@ -9,11 +9,13 @@ use self::winapi::*;
 pub const SECURITY_DESCRIPTOR_MIN_LENGTH: usize = 64;
 pub const SECURITY_DESCRIPTOR_REVISION: DWORD = 1;
 pub const ACL_REVISION: DWORD = 2;
+pub const SE_GROUP_ENABLED: DWORD = 4;
+pub const PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: SIZE_T = 0x00000; // FIXME:
 
 const FACILITY_WIN32: DWORD = 7;
 
 pub fn HRESULT_FROM_WIN32(code: DWORD) -> HRESULT {
-    if (code as HRESULT <= 0) {
+    if (code as HRESULT) <= 0 {
         code as HRESULT
     } else {
         ((code & 0x0000ffff) | ((FACILITY_WIN32 as DWORD) << 16) | 0x80000000) as HRESULT

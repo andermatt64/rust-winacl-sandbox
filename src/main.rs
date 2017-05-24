@@ -12,10 +12,13 @@ mod secapi;
 
 use widestring::WideString;
 use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
-             SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION, HRESULT_FROM_WIN32};
+             SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION, HRESULT_FROM_WIN32, SE_GROUP_ENABLED,
+             PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
 use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET, PCWSTR, PSID_AND_ATTRIBUTES,
-             SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT};
+             SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT,
+             SECURITY_CAPABILITIES, LPPROC_THREAD_ATTRIBUTE_LIST, SIZE_T, PSIZE_T, PVOID,
+             PSECURITY_CAPABILITIES};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -24,7 +27,6 @@ use std::process;
 use std::mem;
 use std::fs::File;
 use std::io::prelude::*;
-use std::path::Path;
 
 #[allow(unused_imports)]
 use field_offset::*;
@@ -339,8 +341,22 @@ impl AppContainerProfile {
     }
 
     fn remove(profile: &str) -> bool {
-        // TODO: DeriveAppContainerSidFromAppContainerName to verify profile exists
-        // TODO: DeleteAppContainerProfile to delete profile
+        let profile_name: Vec<u16> = OsStr::new(profile)
+            .encode_wide()
+            .chain(once(0))
+            .collect();
+        let mut pSid: PSID = 0 as PSID;
+
+        let mut hr = unsafe {
+            secapi::DeriveAppContainerSidFromAppContainerName(profile_name.as_ptr(), &mut pSid)
+        };
+
+        if hr == (ERROR_SUCCESS as HRESULT) {
+            hr = unsafe { secapi::DeleteAppContainerProfile(profile_name.as_ptr()) };
+            return hr == (ERROR_SUCCESS as HRESULT);
+        }
+
+        false
     }
 
     fn enable_outbound_network(&mut self, has_outbound_network: bool) {
@@ -351,12 +367,75 @@ impl AppContainerProfile {
         self.debug = is_debug;
     }
 
-    fn launch(&self, client: SOCKET) {
-        // TODO: If outbound network is enabled, create capabilities list structure
-        // TODO: If not debug, set up security capabilities threat attribute
+    fn launch(&self, client: SOCKET) -> bool {
+        let network_allow_sid = match string_to_sid("S-1-15-3-1") {
+            Ok(x) => x,
+            Err(_) => return false,
+        };
+        let mut capabilities = SECURITY_CAPABILITIES {
+            AppContainerSid: self.sid.raw_ptr,
+            Capabilities: 0 as PSID_AND_ATTRIBUTES,
+            CapabilityCount: 0,
+            Reserved: 0,
+        };
+        let mut attrs;
+
+        if !self.debug {
+
+            // TODO: If outbound network is enabled, create capabilities list structure
+            if !self.outboundNetwork {
+                attrs = SID_AND_ATTRIBUTES {
+                    Sid: network_allow_sid.raw_ptr,
+                    Attributes: SE_GROUP_ENABLED,
+                };
+
+                capabilities.CapabilityCount = 1;
+                capabilities.Capabilities = &mut attrs;
+            }
+
+            let mut listSize: SIZE_T = 0;
+            if unsafe {
+                   kernel32::InitializeProcThreadAttributeList(0 as LPPROC_THREAD_ATTRIBUTE_LIST,
+                                                               1,
+                                                               0,
+                                                               &mut listSize)
+               } !=
+               0 {
+                return false;
+            }
+
+            let mut attrBuf: Vec<u8> = Vec::with_capacity(listSize as usize);
+            if unsafe {
+                   kernel32::InitializeProcThreadAttributeList(attrBuf.as_mut_ptr() as
+                                                               LPPROC_THREAD_ATTRIBUTE_LIST,
+                                                               1,
+                                                               0,
+                                                               &mut listSize)
+               } ==
+               0 {
+                return false;
+            }
+
+            if unsafe {
+                kernel32::UpdateProcThreadAttribute(attrBuf.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST, 
+                                                    0, 
+                                                    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, 
+                                                    unsafe { mem::transmute::<PSECURITY_CAPABILITIES, LPVOID>(&mut capabilities) }, 
+                                                    mem::size_of::<SECURITY_CAPABILITIES>() as SIZE_T, 
+                                                    0 as PVOID, 
+                                                    0 as PSIZE_T) } == 0 {
+                return false
+            }
+
+
+        } else {
+            // TODO: If not debug, set up security capabilities threat attribute
+        }
+
         // TODO: Setup STARTUPINFO/STARTUPINFOEX
         // TODO: Make sure dwCreationFlags has the right flags (EXTENDED_STARTUPINFO_PRESENT for non-debug)
         // TODO: CreateProcess
+        false
     }
 }
 
@@ -406,4 +485,6 @@ fn main() {
     }
 
     let profile = AppContainerProfile::new("default_profile_appjail", "C:\\blah\\cool.exe");
+
+    AppContainerProfile::remove("default_profile_appjail");
 }
