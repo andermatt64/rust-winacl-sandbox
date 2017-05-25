@@ -13,12 +13,13 @@ mod secapi;
 use widestring::WideString;
 use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
              SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION, HRESULT_FROM_WIN32, SE_GROUP_ENABLED,
-             PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES};
+             PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
 use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET, PCWSTR, PSID_AND_ATTRIBUTES,
              SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT,
-             SECURITY_CAPABILITIES, LPPROC_THREAD_ATTRIBUTE_LIST, SIZE_T, PSIZE_T, PVOID,
-             PSECURITY_CAPABILITIES};
+             SECURITY_CAPABILITIES, LPPROC_THREAD_ATTRIBUTE_LIST, PPROC_THREAD_ATTRIBUTE_LIST,
+             SIZE_T, PSIZE_T, PVOID, PSECURITY_CAPABILITIES, STARTUPINFOW, HANDLE, WORD, LPBYTE,
+             STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -379,6 +380,29 @@ impl AppContainerProfile {
             Reserved: 0,
         };
         let mut attrs;
+        let mut si = STARTUPINFOEXW {
+            StartupInfo: STARTUPINFOW {
+                cb: 0 as DWORD,
+                lpReserved: 0 as LPWSTR,
+                lpDesktop: 0 as LPWSTR,
+                lpTitle: 0 as LPWSTR,
+                dwX: 0 as DWORD,
+                dwY: 0 as DWORD,
+                dwXSize: 0 as DWORD,
+                dwYSize: 0 as DWORD,
+                dwXCountChars: 0 as DWORD,
+                dwYCountChars: 0 as DWORD,
+                dwFillAttribute: 0 as DWORD,
+                dwFlags: 0 as DWORD,
+                wShowWindow: 0 as WORD,
+                cbReserved2: 0 as WORD,
+                lpReserved2: 0 as LPBYTE,
+                hStdInput: 0 as HANDLE,
+                hStdOutput: 0 as HANDLE,
+                hStdError: 0 as HANDLE,
+            },
+            lpAttributeList: 0 as PPROC_THREAD_ATTRIBUTE_LIST,
+        };
 
         if !self.debug {
 
@@ -427,12 +451,18 @@ impl AppContainerProfile {
                 return false
             }
 
+            si.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>();
+            si.lpAttributeList = attrBuf.as_mut_ptr() as PPROC_THREAD_ATTRIBUTE_LIST;
 
+            // TODO: add EXTENDED_STARTUPINFO_PRESENT to dwCreationFlags
         } else {
-            // TODO: If not debug, set up security capabilities threat attribute
+            si.StartupInfo.cb = mem::size_of::<STARTUPINFOW>();
         }
 
-        // TODO: Setup STARTUPINFO/STARTUPINFOEX
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        // TODO: Redirect STDIN/STDOUT/STDERR to the socket
+        siStartupInfo.wShowWindow = SW_HIDE;
+
         // TODO: Make sure dwCreationFlags has the right flags (EXTENDED_STARTUPINFO_PRESENT for non-debug)
         // TODO: CreateProcess
         false
