@@ -113,6 +113,7 @@ pub type PACE_HEADER = *mut ACE_HEADER;
 pub type PACCESS_ALLOWED_ACE = *mut ACCESS_ALLOWED_ACE;
 pub type PACCESS_DENIED_ACE = *mut ACCESS_DENIED_ACE;
 pub type PACL_SIZE_INFORMATION = *mut ACL_SIZE_INFORMATION;
+pub type LPSTARTUPINFOEXW = *mut STARTUPINFOEXW;
 
 #[link(name = "advapi32")]
 extern "system" {

@@ -13,13 +13,14 @@ mod secapi;
 use widestring::WideString;
 use secapi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE,
              SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION, HRESULT_FROM_WIN32, SE_GROUP_ENABLED,
-             PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW};
+             PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW, LPSTARTUPINFOEXW};
 use winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL};
-use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET, PCWSTR, PSID_AND_ATTRIBUTES,
-             SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT,
-             SECURITY_CAPABILITIES, LPPROC_THREAD_ATTRIBUTE_LIST, PPROC_THREAD_ATTRIBUTE_LIST,
-             SIZE_T, PSIZE_T, PVOID, PSECURITY_CAPABILITIES, STARTUPINFOW, HANDLE, WORD, LPBYTE,
-             STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE};
+use winapi::{DWORD, LPVOID, BOOL, LPWSTR, HLOCAL, SOCKET, PSID_AND_ATTRIBUTES, SID_AND_ATTRIBUTES,
+             ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT, SECURITY_CAPABILITIES,
+             LPPROC_THREAD_ATTRIBUTE_LIST, PPROC_THREAD_ATTRIBUTE_LIST, SIZE_T, PSIZE_T, PVOID,
+             PSECURITY_CAPABILITIES, STARTUPINFOW, LPSTARTUPINFOW, HANDLE, WORD, LPBYTE,
+             STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE, PROCESS_INFORMATION,
+             EXTENDED_STARTUPINFO_PRESENT, LPSECURITY_ATTRIBUTES};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
@@ -298,6 +299,7 @@ impl SimpleDacl {
     }
 }
 
+#[allow(dead_code)]
 struct AppContainerProfile {
     profile: String,
     childPath: String,
@@ -368,7 +370,7 @@ impl AppContainerProfile {
         self.debug = is_debug;
     }
 
-    fn launch(&self, client: SOCKET) -> bool {
+    fn launch(&self, client: SOCKET, dirPath: &str) -> bool {
         let network_allow_sid = match string_to_sid("S-1-15-3-1") {
             Ok(x) => x,
             Err(_) => return false,
@@ -403,11 +405,10 @@ impl AppContainerProfile {
             },
             lpAttributeList: 0 as PPROC_THREAD_ATTRIBUTE_LIST,
         };
+        let mut dwCreationFlags: DWORD = 0 as DWORD;
 
         if !self.debug {
-
-            // TODO: If outbound network is enabled, create capabilities list structure
-            if !self.outboundNetwork {
+            if self.outboundNetwork {
                 attrs = SID_AND_ATTRIBUTES {
                     Sid: network_allow_sid.raw_ptr,
                     Attributes: SE_GROUP_ENABLED,
@@ -444,28 +445,61 @@ impl AppContainerProfile {
                 kernel32::UpdateProcThreadAttribute(attrBuf.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST, 
                                                     0, 
                                                     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, 
-                                                    unsafe { mem::transmute::<PSECURITY_CAPABILITIES, LPVOID>(&mut capabilities) }, 
+                                                    mem::transmute::<PSECURITY_CAPABILITIES, LPVOID>(&mut capabilities), 
                                                     mem::size_of::<SECURITY_CAPABILITIES>() as SIZE_T, 
                                                     0 as PVOID, 
                                                     0 as PSIZE_T) } == 0 {
                 return false
             }
 
-            si.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>();
+            si.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>() as DWORD;
             si.lpAttributeList = attrBuf.as_mut_ptr() as PPROC_THREAD_ATTRIBUTE_LIST;
 
-            // TODO: add EXTENDED_STARTUPINFO_PRESENT to dwCreationFlags
+            dwCreationFlags |= EXTENDED_STARTUPINFO_PRESENT;
         } else {
-            si.StartupInfo.cb = mem::size_of::<STARTUPINFOW>();
+            si.StartupInfo.cb = mem::size_of::<STARTUPINFOW>() as DWORD;
         }
 
         si.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-        // TODO: Redirect STDIN/STDOUT/STDERR to the socket
-        siStartupInfo.wShowWindow = SW_HIDE;
+        si.StartupInfo.hStdInput = client as HANDLE;
+        si.StartupInfo.hStdOutput = client as HANDLE;
+        si.StartupInfo.hStdError = client as HANDLE;
+        si.StartupInfo.wShowWindow = SW_HIDE as WORD;
 
-        // TODO: Make sure dwCreationFlags has the right flags (EXTENDED_STARTUPINFO_PRESENT for non-debug)
-        // TODO: CreateProcess
-        false
+        let currentDir: Vec<u16> = OsStr::new(&dirPath.to_string())
+            .encode_wide()
+            .chain(once(0))
+            .collect();
+        let mut cmdLine: Vec<u16> = OsStr::new(&self.childPath)
+            .encode_wide()
+            .chain(once(0))
+            .collect();
+        let mut pi = PROCESS_INFORMATION {
+            hProcess: 0 as HANDLE,
+            hThread: 0 as HANDLE,
+            dwProcessId: 0 as DWORD,
+            dwThreadId: 0 as DWORD,
+        };
+
+        if unsafe {
+               kernel32::CreateProcessW(0 as LPWSTR,
+                                        cmdLine.as_mut_ptr(),
+                                        0 as LPSECURITY_ATTRIBUTES,
+                                        0 as LPSECURITY_ATTRIBUTES,
+                                        0,
+                                        dwCreationFlags,
+                                        0 as LPVOID,
+                                        currentDir.as_ptr(),
+                                        mem::transmute::<LPSTARTUPINFOEXW, LPSTARTUPINFOW>(&mut si),
+                                        &mut pi)
+           } == 0 {
+            return false;
+        }
+
+        unsafe { kernel32::CloseHandle(pi.hThread) };
+        unsafe { kernel32::CloseHandle(pi.hProcess) };
+
+        true
     }
 }
 
@@ -514,7 +548,15 @@ fn main() {
         }
     }
 
-    let profile = AppContainerProfile::new("default_profile_appjail", "C:\\blah\\cool.exe");
-
+    let mut profile = match AppContainerProfile::new("default_profile_appjail",
+                                                     "C:\\Users\\yying\\work\\repos\\looper\\target\\debug\\looper.exe") {
+        Ok(x) => x,
+        Err(x) => {
+            println!("Failed to create profile: {:}", x);
+            return;
+        }
+    };
+    profile.launch(0 as SOCKET,
+                   "C:\\Users\\yying\\work\\repos\\looper\\target\\debug");
     AppContainerProfile::remove("default_profile_appjail");
 }
