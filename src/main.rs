@@ -4,7 +4,9 @@ mod appcontainer;
 mod winffi;
 
 #[cfg(windows)]
-fn main() {}
+fn main() {
+    println!("Wilkommen!");
+}
 
 #[cfg(not(windows))]
 fn main() {

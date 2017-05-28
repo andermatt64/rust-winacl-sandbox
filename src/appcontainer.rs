@@ -11,7 +11,7 @@ extern crate widestring;
 
 use super::winffi;
 
-use super::winffi::{HRESULT_FROM_WIN32, SE_GROUP_ENABLED, string_to_sid, SidPtr,
+use super::winffi::{HRESULT_FROM_WIN32, SE_GROUP_ENABLED, string_to_sid, sid_to_string, SidPtr,
                     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW, LPSTARTUPINFOEXW,
                     HandlePtr};
 use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID_AND_ATTRIBUTES,
@@ -19,7 +19,9 @@ use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID
                    LPPROC_THREAD_ATTRIBUTE_LIST, PPROC_THREAD_ATTRIBUTE_LIST, SIZE_T, PSIZE_T,
                    PVOID, PSECURITY_CAPABILITIES, STARTUPINFOW, LPSTARTUPINFOW, HANDLE, WORD,
                    LPBYTE, STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE,
-                   PROCESS_INFORMATION, EXTENDED_STARTUPINFO_PRESENT, LPSECURITY_ATTRIBUTES};
+                   ERROR_FILE_NOT_FOUND, PROCESS_INFORMATION, EXTENDED_STARTUPINFO_PRESENT,
+                   LPSECURITY_ATTRIBUTES};
+use std::path::Path;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::iter::once;
@@ -41,6 +43,10 @@ impl Profile {
             .encode_wide()
             .chain(once(0))
             .collect();
+
+        if !Path::new(path).exists() {
+            return Err(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+        }
 
         let mut hr = unsafe {
             winffi::CreateAppContainerProfile(profile_name.as_ptr(),
@@ -186,10 +192,15 @@ impl Profile {
             si.StartupInfo.cb = mem::size_of::<STARTUPINFOW>() as DWORD;
         }
 
-        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-        si.StartupInfo.hStdInput = client as HANDLE;
-        si.StartupInfo.hStdOutput = client as HANDLE;
-        si.StartupInfo.hStdError = client as HANDLE;
+        si.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
+
+        if (client as DWORD) != 0xffffffff {
+            si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+            si.StartupInfo.hStdInput = client as HANDLE;
+            si.StartupInfo.hStdOutput = client as HANDLE;
+            si.StartupInfo.hStdError = client as HANDLE;
+        }
+
         si.StartupInfo.wShowWindow = SW_HIDE as WORD;
 
         let currentDir: Vec<u16> = OsStr::new(&dirPath.to_string())
@@ -228,6 +239,74 @@ impl Profile {
     }
 }
 
+#[test]
+fn test_profile_sid() {
+    {
+        let result = Profile::new("default_profile", "INVALID_FILE");
+        assert!(result.is_err());
+    }
+
+    {
+        let mut result = Profile::new("cmd_profile", "\\Windows\\System32\\cmd.exe");
+        assert!(result.is_ok());
+
+        let profile = result.unwrap();
+        let profile_sid = match sid_to_string(profile.sid.raw_ptr) {
+            Ok(x) => x,
+            _ => {
+                assert!(false);
+                return;
+            }
+        };
+
+        result = Profile::new("cmd_profile", "\\Windows\\System32\\cmd.exe");
+        assert!(result.is_ok());
+
+        let same_profile = result.unwrap();
+        let same_profile_sid = match sid_to_string(same_profile.sid.raw_ptr) {
+            Ok(x) => x,
+            _ => {
+                assert!(false);
+                return;
+            }
+        };
+
+        assert_eq!(profile_sid, same_profile_sid);
+
+        assert!(Profile::remove("cmd_profile"));
+
+        result = Profile::new("cmd_profile1", "\\Windows\\System32\\cmd.exe");
+        assert!(result.is_ok());
+
+        let new_profile = result.unwrap();
+        let new_profile_sid = match sid_to_string(new_profile.sid.raw_ptr) {
+            Ok(x) => x,
+            _ => {
+                assert!(false);
+                return;
+            }
+        };
+
+        assert!(profile_sid != new_profile_sid);
+    }
+}
+
+#[test]
+fn test_basic_jail() {
+    // TODO: Make sure that within a jail, we cannot access key.txt
+}
+
+#[test]
+// XXX: requires internet accessibly computer!
+fn test_outbound_network() {
+    // TODO: Test to see if toggling enable_outbound_network affects a child's ability to reach the internet
+}
+
+#[test]
+fn test_debug() {
+    // TODO: Test to make sure that in debug, we can read key.txt
+}
+
 /*
     let mut profile = match AppContainerProfile::new("default_profile_appjail",
                                                      "C:\\Users\\yying\\work\\repos\\looper\\target\\debug\\looper.exe") {
@@ -237,7 +316,7 @@ impl Profile {
             return;
         }
     };
-    profile.launch(0 as SOCKET,
+    profile.launch(0xffffffff as SOCKET,
                    "C:\\Users\\yying\\work\\repos\\looper\\target\\debug");
     AppContainerProfile::remove("default_profile_appjail");
 */
