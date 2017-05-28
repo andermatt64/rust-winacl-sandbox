@@ -21,11 +21,12 @@ use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID
                    LPBYTE, STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE,
                    ERROR_FILE_NOT_FOUND, PROCESS_INFORMATION, EXTENDED_STARTUPINFO_PRESENT,
                    LPSECURITY_ATTRIBUTES};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::iter::once;
 use std::mem;
+use std::env;
 
 #[allow(dead_code)]
 pub struct Profile {
@@ -272,19 +273,25 @@ fn test_profile_sid() {
     }
 }
 
+#[cfg(test)]
+fn get_unittest_support_path() -> Option<PathBuf> {
+    None
+}
+
 #[test]
-fn test_basic_jail() {
+fn test_file_io() {
     // TODO: Make sure that within a jail, we cannot access key.txt
+
 }
 
 #[test]
 // XXX: requires internet accessibly computer!
-fn test_outbound_network() {
+fn test_network_io() {
     // TODO: Test to see if toggling enable_outbound_network affects a child's ability to reach the internet
 }
 
 #[test]
-fn test_debug() {
+fn test_registry_io() {
     // TODO: Test to make sure that in debug, we can read key.txt
 }
 
