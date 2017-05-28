@@ -2,9 +2,18 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
-extern crate winapi;
+#![cfg(windows)]
 
+extern crate winapi;
+extern crate kernel32;
+extern crate libc;
+extern crate widestring;
+
+use self::widestring::WideString;
 use self::winapi::*;
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+use std::iter::once;
 
 pub const SECURITY_DESCRIPTOR_MIN_LENGTH: usize = 64;
 pub const SECURITY_DESCRIPTOR_REVISION: DWORD = 1;
@@ -21,6 +30,10 @@ pub const PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES: SIZE_T =
     ((ProcThreadAttributeSecurityCapabilities & PROC_THREAD_ATTRIBUTE_NUMBER) |
      PROC_THREAD_ATTRIBUTE_INPUT) as SIZE_T;
 
+pub const GENERIC_ALL: DWORD = 0x10000000 as DWORD;
+pub const GENERIC_READ: DWORD = 0x80000000 as DWORD;
+pub const GENERIC_WRITE: DWORD = 0x40000000 as DWORD;
+pub const GENERIC_EXECUTE: DWORD = 0x20000000 as DWORD;
 
 const FACILITY_WIN32: DWORD = 7;
 
@@ -32,6 +45,7 @@ pub fn HRESULT_FROM_WIN32(code: DWORD) -> HRESULT {
     }
 }
 
+// Copied from winapi-rs
 macro_rules! DEF_STRUCT {
     {$(#[$attrs:meta])* nodebug struct $name:ident { $($field:ident: $ftype:ty,)+ }} => {
         #[repr(C)] $(#[$attrs])*
@@ -51,6 +65,7 @@ macro_rules! DEF_STRUCT {
     };
 }
 
+// Copied from winapi-rs
 macro_rules! DEF_ENUM {
     {enum $name:ident { $($variant:ident = $value:expr,)+ }} => {
         pub type $name = u32;
@@ -114,6 +129,62 @@ pub type PACCESS_ALLOWED_ACE = *mut ACCESS_ALLOWED_ACE;
 pub type PACCESS_DENIED_ACE = *mut ACCESS_DENIED_ACE;
 pub type PACL_SIZE_INFORMATION = *mut ACL_SIZE_INFORMATION;
 pub type LPSTARTUPINFOEXW = *mut STARTUPINFOEXW;
+
+pub struct SidPtr {
+    pub raw_ptr: PSID,
+}
+
+impl Drop for SidPtr {
+    fn drop(&mut self) {
+        if self.raw_ptr != (0 as PSID) {
+            unsafe {
+                FreeSid(self.raw_ptr);
+            }
+        }
+    }
+}
+
+pub fn string_to_sid(StringSid: &str) -> Result<SidPtr, DWORD> {
+    let mut pSid: PSID = 0 as PSID;
+    let wSid: Vec<u16> = OsStr::new(StringSid)
+        .encode_wide()
+        .chain(once(0))
+        .collect();
+
+    if unsafe { ConvertStringSidToSidW(wSid.as_ptr(), &mut pSid) } == 0 {
+        return Err(unsafe { kernel32::GetLastError() });
+    }
+
+    Ok(SidPtr { raw_ptr: pSid })
+}
+
+pub fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
+    let mut rawStringSid: LPWSTR = 0 as LPWSTR;
+
+    if unsafe { ConvertSidToStringSidW(pSid, &mut rawStringSid) } == 0 ||
+       rawStringSid == (0 as LPWSTR) {
+        return Err(unsafe { kernel32::GetLastError() });
+    }
+
+    let rawStringSidLen = unsafe { libc::wcslen(rawStringSid) };
+    let out = unsafe { WideString::from_ptr(rawStringSid, rawStringSidLen) };
+
+    unsafe { kernel32::LocalFree(rawStringSid as HLOCAL) };
+
+    Ok(out.to_string_lossy())
+}
+
+pub struct HandlePtr {
+    pub raw: HANDLE,
+}
+
+impl Drop for HandlePtr {
+    fn drop(&mut self) {
+        unsafe {
+            kernel32::CloseHandle(self.raw);
+        }
+    }
+}
 
 #[link(name = "advapi32")]
 extern "system" {
