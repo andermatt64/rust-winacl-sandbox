@@ -134,9 +134,17 @@ pub struct SidPtr {
     pub raw_ptr: PSID,
 }
 
+impl SidPtr {
+    pub fn new(ptr: PSID) -> SidPtr {
+        println!("{:?} => Sid new()", ptr);
+        SidPtr { raw_ptr: ptr }
+    }
+}
+
 impl Drop for SidPtr {
     fn drop(&mut self) {
         if self.raw_ptr != (0 as PSID) {
+            println!("{:?} => Sid drop()", self.raw_ptr);
             unsafe {
                 FreeSid(self.raw_ptr);
             }
@@ -155,7 +163,7 @@ pub fn string_to_sid(StringSid: &str) -> Result<SidPtr, DWORD> {
         return Err(unsafe { kernel32::GetLastError() });
     }
 
-    Ok(SidPtr { raw_ptr: pSid })
+    Ok(SidPtr::new(pSid))
 }
 
 pub fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
@@ -174,12 +182,42 @@ pub fn sid_to_string(pSid: PSID) -> Result<String, DWORD> {
     Ok(out.to_string_lossy())
 }
 
+#[test]
+fn test_invalid_sid() {
+    let result = string_to_sid("INVALID_SID");
+    assert!(result.is_err());
+
+    let result2 = sid_to_string(0 as PSID);
+    assert!(result2.is_err());
+}
+
+#[test]
+fn test_sid_conv() {
+    let orig_sid = "S-1-5-32-556";
+
+    let result = string_to_sid(orig_sid);
+    assert!(result.is_ok());
+
+    let result2 = sid_to_string(result.unwrap().raw_ptr);
+    assert!(result2.is_ok());
+
+    assert_eq!(result2.unwrap(), orig_sid);
+}
+
 pub struct HandlePtr {
     pub raw: HANDLE,
 }
 
+impl HandlePtr {
+    pub fn new(ptr: HANDLE) -> HandlePtr {
+        println!("{:?} => Handle new()", ptr);
+        HandlePtr { raw: ptr }
+    }
+}
+
 impl Drop for HandlePtr {
     fn drop(&mut self) {
+        println!("{:?} => Handle drop()", self.raw);
         unsafe {
             kernel32::CloseHandle(self.raw);
         }

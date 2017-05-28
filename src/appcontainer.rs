@@ -33,7 +33,7 @@ pub struct Profile {
     childPath: String,
     outboundNetwork: bool,
     debug: bool,
-    sid: SidPtr,
+    sid: String,
 }
 
 impl Profile {
@@ -71,7 +71,10 @@ impl Profile {
                childPath: path.to_string(),
                outboundNetwork: true,
                debug: false,
-               sid: SidPtr { raw_ptr: pSid },
+               sid: match sid_to_string(pSid) {
+                   Ok(x) => x,
+                   x => return Err(-1),
+               },
            })
     }
 
@@ -107,8 +110,9 @@ impl Profile {
             Ok(x) => x,
             Err(_) => return Err(0xffffffff),
         };
+        let sid = string_to_sid(&self.sid)?;
         let mut capabilities = SECURITY_CAPABILITIES {
-            AppContainerSid: self.sid.raw_ptr,
+            AppContainerSid: sid.raw_ptr,
             Capabilities: 0 as PSID_AND_ATTRIBUTES,
             CapabilityCount: 0,
             Reserved: 0,
@@ -235,7 +239,7 @@ impl Profile {
 
         unsafe { kernel32::CloseHandle(pi.hThread) };
 
-        Ok(HandlePtr { raw: pi.hProcess })
+        Ok(HandlePtr::new(pi.hProcess))
     }
 }
 
@@ -251,27 +255,12 @@ fn test_profile_sid() {
         assert!(result.is_ok());
 
         let profile = result.unwrap();
-        let profile_sid = match sid_to_string(profile.sid.raw_ptr) {
-            Ok(x) => x,
-            _ => {
-                assert!(false);
-                return;
-            }
-        };
 
         result = Profile::new("cmd_profile", "\\Windows\\System32\\cmd.exe");
         assert!(result.is_ok());
 
         let same_profile = result.unwrap();
-        let same_profile_sid = match sid_to_string(same_profile.sid.raw_ptr) {
-            Ok(x) => x,
-            _ => {
-                assert!(false);
-                return;
-            }
-        };
-
-        assert_eq!(profile_sid, same_profile_sid);
+        assert_eq!(profile.sid, same_profile.sid);
 
         assert!(Profile::remove("cmd_profile"));
 
@@ -279,15 +268,7 @@ fn test_profile_sid() {
         assert!(result.is_ok());
 
         let new_profile = result.unwrap();
-        let new_profile_sid = match sid_to_string(new_profile.sid.raw_ptr) {
-            Ok(x) => x,
-            _ => {
-                assert!(false);
-                return;
-            }
-        };
-
-        assert!(profile_sid != new_profile_sid);
+        assert!(profile.sid != new_profile.sid);
     }
 }
 
