@@ -27,9 +27,6 @@ use std::process;
 use std::os::windows::io::AsRawSocket;
 
 #[cfg(not(test))]
-use winapi::SOCKET;
-
-#[cfg(not(test))]
 use std::path::{Path, PathBuf};
 
 #[allow(unused_imports)]
@@ -199,12 +196,13 @@ fn do_run(matches: &ArgMatches) {
                     SERVER => {
                         if let Ok((client_sock, client_addr)) = server.accept() {
                             println!(" => New connection from {:?}", client_addr);
-                            info!("  => Connection {:?} from {:?}",
+                            info!("  => Connection socket {:08x} from {:?}",
                                   client_sock.as_raw_socket(),
                                   client_addr);
 
                             // NOTE: Watch out for the unwrap()
-                            match profile.launch(client_sock.as_raw_socket() as SOCKET,
+                            // FIXME: We need to convert client_sock into a WSASocket somehow...
+                            match profile.launch(client_sock.as_raw_socket(),
                                                  key_dir_path.to_str().unwrap()) {
                                 Ok(x) => {
                                     info!("     Launched new process with handle {:?}", x.raw);
