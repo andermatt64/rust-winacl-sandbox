@@ -218,7 +218,7 @@ impl Profile {
 
         si.StartupInfo.wShowWindow = SW_HIDE as WORD;
 
-        let currentDir: Vec<u16> = OsStr::new(&dirPath.to_string())
+        let currentDir: Vec<u16> = OsStr::new(dirPath)
             .encode_wide()
             .chain(once(0))
             .collect();

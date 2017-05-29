@@ -185,6 +185,8 @@ fn do_run(matches: &ArgMatches) {
         info!("Entering event loop");
         println!("Listening on {:} for new requests...", addr);
 
+        let key_dir_abspath = key_dir_path.canonicalize().unwrap();
+
         loop {
             if let Err(_) = poll.poll(&mut events, None) {
                 error!("Poll failed");
@@ -195,17 +197,18 @@ fn do_run(matches: &ArgMatches) {
                 match event.token() {
                     SERVER => {
                         if let Ok((client_sock, client_addr)) = server.accept() {
+                            let raw_socket = client_sock.as_raw_socket();
                             println!(" => New connection from {:?}", client_addr);
                             info!("  => Connection socket {:08x} from {:?}",
-                                  client_sock.as_raw_socket(),
+                                  raw_socket,
                                   client_addr);
 
                             // NOTE: Watch out for the unwrap()
-                            // FIXME: We need to convert client_sock into a WSASocket somehow...
-                            match profile.launch(client_sock.as_raw_socket(),
-                                                 key_dir_path.to_str().unwrap()) {
+                            match profile.launch(raw_socket, key_dir_abspath.to_str().unwrap()) {
                                 Ok(x) => {
-                                    info!("     Launched new process with handle {:?}", x.raw);
+                                    info!("     Launched new process with handle {:?} with current_dir = {:?}",
+                                          x.raw,
+                                          key_dir_path);
                                 }
                                 Err(x) => {
                                     error!("     Failed to launch new process: error={:}", x);
