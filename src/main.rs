@@ -20,11 +20,14 @@ use mio::tcp::TcpListener;
 #[cfg(not(test))]
 use std::process;
 
+#[cfg(all(not(test), windows))]
+use std::os::windows::io::AsRawSocket;
+
 #[cfg(not(test))]
 use winapi::SOCKET;
 
 #[cfg(not(test))]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[allow(unused_imports)]
 use log::*;
@@ -45,7 +48,7 @@ fn build_version() -> String {
 #[cfg(all(windows, not(test)))]
 #[allow(unreachable_code)]
 fn do_run(matches: &ArgMatches) {
-    let key_path = Path::new(matches.value_of("key").unwrap());
+    let key_path = PathBuf::from(matches.value_of("key").unwrap());
     info!("  key_path = {:?}", key_path);
 
     if !key_path.exists() || key_path.is_dir() || !key_path.is_file() {
@@ -91,7 +94,10 @@ fn do_run(matches: &ArgMatches) {
           matches.is_present("debug"));
 
     // TODO: Add AppContainer SID to key and key's root directory
-    // let key_dir_path
+    let mut key_dir_path = key_path.clone();
+    key_dir_path.pop();
+
+    println!("{:?}", key_dir_path);
 
     {
         const SERVER: Token = Token(0);
@@ -140,10 +146,19 @@ fn do_run(matches: &ArgMatches) {
                         if let Ok((client_sock, client_addr)) = server.accept() {
                             println!(" => New connection from {:?}", client_addr);
                             info!("  => Connection {:?} from {:?}",
-                                  client_sock.as_raw_fd(),
+                                  client_sock.as_raw_socket(),
                                   client_addr);
 
-                            // let _ = profile.launch(client_sock.as_raw_fd() as SOCKET, key_dir_path);
+                            // NOTE: Watch out for the unwrap()
+                            match profile.launch(client_sock.as_raw_socket() as SOCKET,
+                                                 key_dir_path.to_str().unwrap()) {
+                                Ok(x) => {
+                                    info!("     Launched new process with handle {:?}", x.raw);
+                                }
+                                Err(x) => {
+                                    error!("     Failed to launch new process: error={:}", x);
+                                }
+                            }
                         }
                     }
                     _ => unreachable!(),
