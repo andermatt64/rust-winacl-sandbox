@@ -1,6 +1,8 @@
 extern crate clap;
 extern crate env_logger;
 extern crate log;
+extern crate mio;
+extern crate winapi;
 
 include!(concat!(env!("OUT_DIR"), "/version.rs"));
 
@@ -10,7 +12,16 @@ mod appcontainer;
 mod winffi;
 
 #[cfg(not(test))]
+use mio::*;
+
+#[cfg(not(test))]
+use mio::tcp::TcpListener;
+
+#[cfg(not(test))]
 use std::process;
+
+#[cfg(not(test))]
+use winapi::SOCKET;
 
 #[cfg(not(test))]
 use std::path::Path;
@@ -32,6 +43,7 @@ fn build_version() -> String {
 }
 
 #[cfg(all(windows, not(test)))]
+#[allow(unreachable_code)]
 fn do_run(matches: &ArgMatches) {
     let key_path = Path::new(matches.value_of("key").unwrap());
     info!("  key_path = {:?}", key_path);
@@ -49,14 +61,98 @@ fn do_run(matches: &ArgMatches) {
         process::exit(-1);
     }
 
-    let addr = format!("{}:{}",
-                       matches.value_of("host").unwrap(),
-                       matches.value_of("port").unwrap());
+    let addr: &str = &format!("{}:{}",
+                              matches.value_of("host").unwrap(),
+                              matches.value_of("port").unwrap());
     info!("  tcp server addr = {:?}", addr);
 
     let profile_name = matches.value_of("name").unwrap();
     info!("  profile name = {:?}", profile_name);
 
+    // NOTE: Will special unicode paths mess up this unwrap()?
+    let mut profile = match appcontainer::Profile::new(profile_name,
+                                                       child_path.to_str().unwrap()) {
+        Ok(x) => x,
+        Err(x) => {
+            error!("Failed to create AppContainer profile for {:}: error={:}",
+                   profile_name,
+                   x);
+            process::exit(-1);
+        }
+    };
+    info!("profile name = {:}, sid = {:}", profile_name, profile.sid);
+
+    profile.enable_outbound_network(matches.is_present("outbound"));
+    info!("AppContainer.enable_outbound_network_conn = {:}",
+          matches.is_present("outbound"));
+
+    profile.enable_debug(matches.is_present("debug"));
+    info!("AppContainer.enable_debug = {:}",
+          matches.is_present("debug"));
+
+    // TODO: Add AppContainer SID to key and key's root directory
+    // let key_dir_path
+
+    {
+        const SERVER: Token = Token(0);
+
+        let server_addr = match addr.parse() {
+            Ok(x) => x,
+            Err(_) => {
+                error!("Invalid socket address \"{:}\"", addr);
+                process::exit(-1);
+            }
+        };
+        let server = match TcpListener::bind(&server_addr) {
+            Ok(x) => x,
+            Err(_) => {
+                error!("Failed to bind server socket on {:}", addr);
+                process::exit(-1);
+            }
+        };
+
+        let poll = match Poll::new() {
+            Ok(x) => x,
+            Err(_) => {
+                error!("Failed to create poll");
+                process::exit(-1);
+            }
+        };
+
+        if let Err(_) = poll.register(&server, SERVER, Ready::readable(), PollOpt::edge()) {
+            error!("Failed to register server socket into poll");
+            process::exit(-1);
+        }
+
+        let mut events = Events::with_capacity(1024);
+        info!("Entering event loop");
+        println!("Listening on {:} for new requests...", addr);
+
+        loop {
+            if let Err(_) = poll.poll(&mut events, None) {
+                error!("Poll failed");
+                process::exit(-1);
+            }
+
+            for event in events.iter() {
+                match event.token() {
+                    SERVER => {
+                        if let Ok((client_sock, client_addr)) = server.accept() {
+                            println!(" => New connection from {:?}", client_addr);
+                            info!("  => Connection {:?} from {:?}",
+                                  client_sock.as_raw_fd(),
+                                  client_addr);
+
+                            // let _ = profile.launch(client_sock.as_raw_fd() as SOCKET, key_dir_path);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        process::exit(0);
+    }
 }
 
 #[cfg(all(windows, not(test)))]
