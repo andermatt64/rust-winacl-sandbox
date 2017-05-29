@@ -11,7 +11,7 @@ extern crate widestring;
 
 use super::winffi;
 
-use super::winffi::{HRESULT_FROM_WIN32, SE_GROUP_ENABLED, string_to_sid, sid_to_string, SidPtr,
+use super::winffi::{HRESULT_FROM_WIN32, SE_GROUP_ENABLED, string_to_sid, sid_to_string,
                     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW, LPSTARTUPINFOEXW,
                     HandlePtr};
 use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID_AND_ATTRIBUTES,
@@ -20,7 +20,7 @@ use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID
                    PVOID, PSECURITY_CAPABILITIES, STARTUPINFOW, LPSTARTUPINFOW, HANDLE, WORD,
                    LPBYTE, STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE,
                    ERROR_FILE_NOT_FOUND, PROCESS_INFORMATION, EXTENDED_STARTUPINFO_PRESENT,
-                   LPSECURITY_ATTRIBUTES};
+                   LPSECURITY_ATTRIBUTES, INFINITE, WAIT_OBJECT_0};
 use std::path::{Path, PathBuf};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
@@ -74,7 +74,7 @@ impl Profile {
                debug: false,
                sid: match sid_to_string(pSid) {
                    Ok(x) => x,
-                   x => return Err(-1),
+                   _ => return Err(-1),
                },
            })
     }
@@ -275,36 +275,105 @@ fn test_profile_sid() {
 
 #[cfg(test)]
 fn get_unittest_support_path() -> Option<PathBuf> {
+    let mut dir_path = match env::current_exe() {
+        Ok(x) => x,
+        Err(_) => return None,
+    };
+
+    while dir_path.pop() {
+        dir_path.push("unittest_support");
+        if dir_path.exists() && dir_path.is_dir() {
+            return Some(dir_path);
+        }
+        dir_path.pop();
+    }
+
     None
 }
 
+#[cfg(test)]
+const OUTBOUND_CONNECT_MASK: u32 = 0x00000001;
+#[cfg(test)]
+const FILE_READ_MASK: u32 = 0x00000002;
+#[cfg(test)]
+const FILE_WRITE_MASK: u32 = 0x00000004;
+#[cfg(test)]
+const REGISTRY_READ_MASK: u32 = 0x00000008;
+#[cfg(test)]
+const REGISTRY_WRITE_MASK: u32 = 0x00000010;
+
 #[test]
-fn test_file_io() {
-    // TODO: Make sure that within a jail, we cannot access key.txt
+fn test_appcontainer() {
+    let result = get_unittest_support_path();
+    assert!(!result.is_none());
 
-}
+    let mut child_path = result.unwrap();
+    let dir_path = child_path.clone();
+    child_path.push("sandbox-test.exe");
 
-#[test]
-// XXX: requires internet accessibly computer!
-fn test_network_io() {
-    // TODO: Test to see if toggling enable_outbound_network affects a child's ability to reach the internet
-}
+    Profile::remove("default_appjail");
+    if let Ok(mut profile) = Profile::new("default_appjail", child_path.to_str().unwrap()) {
+        {
+            let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
+            assert!(launch_result.is_ok());
 
-#[test]
-fn test_registry_io() {
-    // TODO: Test to make sure that in debug, we can read key.txt
-}
+            let hProcess = launch_result.unwrap();
+            assert_eq!(unsafe { kernel32::WaitForSingleObject(hProcess.raw, INFINITE) },
+                       WAIT_OBJECT_0);
 
-/*
-    let mut profile = match AppContainerProfile::new("default_profile_appjail",
-                                                     "C:\\Users\\yying\\work\\repos\\looper\\target\\debug\\looper.exe") {
-        Ok(x) => x,
-        Err(x) => {
-            println!("Failed to create profile: {:}", x);
-            return;
+            let mut dwExitCode: DWORD = 0 as DWORD;
+            assert!(unsafe { kernel32::GetExitCodeProcess(hProcess.raw, &mut dwExitCode) } != 0);
+
+            assert!((dwExitCode & OUTBOUND_CONNECT_MASK) == 0);
+            assert!((dwExitCode & FILE_READ_MASK) != 0);
+            assert!((dwExitCode & FILE_WRITE_MASK) != 0);
+            assert!((dwExitCode & REGISTRY_READ_MASK) == 0);
+            assert!((dwExitCode & REGISTRY_WRITE_MASK) != 0);
         }
-    };
-    profile.launch(0xffffffff as SOCKET,
-                   "C:\\Users\\yying\\work\\repos\\looper\\target\\debug");
-    AppContainerProfile::remove("default_profile_appjail");
-*/
+
+        profile.enable_outbound_network(false);
+
+        {
+            let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
+            assert!(launch_result.is_ok());
+
+            let hProcess = launch_result.unwrap();
+            assert_eq!(unsafe { kernel32::WaitForSingleObject(hProcess.raw, INFINITE) },
+                       WAIT_OBJECT_0);
+
+            let mut dwExitCode: DWORD = 0 as DWORD;
+            assert!(unsafe { kernel32::GetExitCodeProcess(hProcess.raw, &mut dwExitCode) } != 0);
+
+            assert!((dwExitCode & OUTBOUND_CONNECT_MASK) != 0);
+            assert!((dwExitCode & FILE_READ_MASK) != 0);
+            assert!((dwExitCode & FILE_WRITE_MASK) != 0);
+            assert!((dwExitCode & REGISTRY_READ_MASK) == 0);
+            assert!((dwExitCode & REGISTRY_WRITE_MASK) != 0);
+        }
+
+        profile.enable_outbound_network(true);
+        profile.enable_debug(true);
+
+        {
+            let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
+            assert!(launch_result.is_ok());
+
+            let hProcess = launch_result.unwrap();
+            assert_eq!(unsafe { kernel32::WaitForSingleObject(hProcess.raw, INFINITE) },
+                       WAIT_OBJECT_0);
+
+            let mut dwExitCode: DWORD = 0 as DWORD;
+            assert!(unsafe { kernel32::GetExitCodeProcess(hProcess.raw, &mut dwExitCode) } != 0);
+
+            assert!((dwExitCode & OUTBOUND_CONNECT_MASK) == 0);
+            assert!((dwExitCode & FILE_READ_MASK) == 0);
+            assert!((dwExitCode & FILE_WRITE_MASK) == 0);
+            assert!((dwExitCode & REGISTRY_READ_MASK) == 0);
+            assert!((dwExitCode & REGISTRY_WRITE_MASK) == 0);
+        }
+
+        Profile::remove("default_appjail");
+    } else {
+        assert!(false);
+    }
+}

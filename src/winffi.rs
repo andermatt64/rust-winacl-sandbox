@@ -136,7 +136,6 @@ pub struct SidPtr {
 
 impl SidPtr {
     pub fn new(ptr: PSID) -> SidPtr {
-        println!("{:?} => Sid new()", ptr);
         SidPtr { raw_ptr: ptr }
     }
 }
@@ -144,7 +143,6 @@ impl SidPtr {
 impl Drop for SidPtr {
     fn drop(&mut self) {
         if self.raw_ptr != (0 as PSID) {
-            println!("{:?} => Sid drop()", self.raw_ptr);
             unsafe {
                 FreeSid(self.raw_ptr);
             }
@@ -210,14 +208,12 @@ pub struct HandlePtr {
 
 impl HandlePtr {
     pub fn new(ptr: HANDLE) -> HandlePtr {
-        println!("{:?} => Handle new()", ptr);
         HandlePtr { raw: ptr }
     }
 }
 
 impl Drop for HandlePtr {
     fn drop(&mut self) {
-        println!("{:?} => Handle drop()", self.raw);
         unsafe {
             kernel32::CloseHandle(self.raw);
         }
