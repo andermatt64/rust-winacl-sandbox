@@ -39,14 +39,18 @@ use std::io::prelude::*;
 #[allow(unused_imports)]
 use self::field_offset::*;
 
+pub type ACL_ENTRY_TYPE = u8;
 
+pub const ACCESS_ALLOWED: u8 = 0;
+#[allow(dead_code)]
+pub const ACCESS_DENIED: u8 = 1;
 
 #[allow(dead_code)]
 pub struct AccessControlEntry {
-    entryType: u8,
-    flags: u8,
-    mask: u32,
-    sid: String,
+    pub entryType: u8,
+    pub flags: u8,
+    pub mask: u32,
+    pub sid: String,
 }
 
 #[allow(dead_code)]
@@ -150,7 +154,7 @@ impl SimpleDacl {
     pub fn add_entry(&mut self, entry: AccessControlEntry) -> bool {
         let target: usize;
         match entry.entryType {
-            0 => {
+            ACCESS_ALLOWED => {
                 // We are assuming that the list is proper: that denied ACEs are placed
                 // prior to allow ACEs
                 match self.entries.iter().position(|&ref x| x.entryType != 1) {
@@ -162,7 +166,7 @@ impl SimpleDacl {
                     }
                 }
             }
-            1 => {
+            ACCESS_DENIED => {
                 target = 0;
             }
             _ => return false,
@@ -173,7 +177,9 @@ impl SimpleDacl {
             Ok(_) => {}
         }
 
-        if self.entries.iter().any(|x| x.sid == entry.sid) {
+        if self.entries
+               .iter()
+               .any(|x| x.sid == entry.sid && x.entryType == entry.entryType) {
             return false;
         }
 
@@ -186,8 +192,10 @@ impl SimpleDacl {
         true
     }
 
-    pub fn remove_entry(&mut self, sid: &str) -> bool {
-        let index = match self.entries.iter().position(|x| x.sid == sid) {
+    pub fn remove_entry(&mut self, sid: &str, entryType: ACL_ENTRY_TYPE) -> bool {
+        let index = match self.entries
+                  .iter()
+                  .position(|x| x.sid == sid && x.entryType == entryType) {
             Some(x) => x,
             _ => return false,
         };
@@ -285,7 +293,7 @@ fn test_add_remove_entry() {
     assert!(!acl.add_entry(AccessControlEntry {
                                sid: String::from("FAKESID"),
                                mask: GENERIC_READ,
-                               entryType: 0,
+                               entryType: ACCESS_ALLOWED,
                                flags: 0,
                            }));
     assert_eq!(acl.get_entries().iter().count(), 0);
@@ -302,7 +310,7 @@ fn test_add_remove_entry() {
     assert!(acl.add_entry(AccessControlEntry {
                               sid: String::from("S-1-1-1"),
                               mask: GENERIC_WRITE,
-                              entryType: 1,
+                              entryType: ACCESS_DENIED,
                               flags: 0,
                           }));
     assert_eq!(acl.get_entries().iter().count(), 1);
@@ -311,7 +319,7 @@ fn test_add_remove_entry() {
     assert!(!acl.add_entry(AccessControlEntry {
                                sid: String::from("S-1-1-1"),
                                mask: GENERIC_WRITE,
-                               entryType: 1,
+                               entryType: ACCESS_DENIED,
                                flags: 0,
                            }));
     assert_eq!(acl.get_entries().iter().count(), 1);
@@ -319,7 +327,7 @@ fn test_add_remove_entry() {
     assert!(acl.add_entry(AccessControlEntry {
                               sid: String::from("S-1-1-2"),
                               mask: GENERIC_READ,
-                              entryType: 0,
+                              entryType: ACCESS_ALLOWED,
                               flags: 0,
                           }));
     assert_eq!(acl.get_entries().iter().count(), 2);
@@ -331,7 +339,7 @@ fn test_add_remove_entry() {
         let entry = result.unwrap();
         assert_eq!(&entry.sid, "S-1-1-1");
         assert_eq!(entry.mask, GENERIC_WRITE);
-        assert_eq!(entry.entryType, 1);
+        assert_eq!(entry.entryType, ACCESS_DENIED);
     }
 
     {
@@ -341,10 +349,11 @@ fn test_add_remove_entry() {
         let entry = result.unwrap();
         assert_eq!(&entry.sid, "S-1-1-2");
         assert_eq!(entry.mask, GENERIC_READ);
-        assert_eq!(entry.entryType, 0);
+        assert_eq!(entry.entryType, ACCESS_ALLOWED);
     }
 
-    assert!(acl.remove_entry("S-1-1-1"));
+    assert!(!acl.remove_entry("S-1-1-1", ACCESS_ALLOWED));
+    assert!(acl.remove_entry("S-1-1-1", ACCESS_DENIED));
     assert_eq!(acl.get_entries().iter().count(), 1);
 
     {
@@ -354,7 +363,7 @@ fn test_add_remove_entry() {
         let entry = result.unwrap();
         assert_eq!(&entry.sid, "S-1-1-2");
         assert_eq!(entry.mask, GENERIC_READ);
-        assert_eq!(entry.entryType, 0);
+        assert_eq!(entry.entryType, ACCESS_ALLOWED);
     }
 
 }
@@ -377,6 +386,7 @@ fn test_add_and_remove_acl_entry() {
 
     let orig_count;
     let orig_sid;
+    let orig_type;
 
     // Ensure initial ACL read can occur and reports somewhat correct values
     {
@@ -399,9 +409,10 @@ fn test_add_and_remove_acl_entry() {
                 }
             };
             orig_sid = entry.sid.clone();
+            orig_type = entry.entryType;
         }
 
-        assert!(acl.remove_entry(&orig_sid));
+        assert!(acl.remove_entry(&orig_sid, orig_type));
         assert!(acl.get_entries().iter().count() != orig_count);
         assert_eq!(acl.apply_to_path(tmp_file_path), Ok(0));
     }
@@ -425,7 +436,7 @@ fn test_add_and_remove_acl_entry() {
         assert!(acl.add_entry(AccessControlEntry {
                                   sid: String::from("S-1-1-0"),
                                   mask: GENERIC_ALL,
-                                  entryType: 0,
+                                  entryType: ACCESS_ALLOWED,
                                   flags: 0,
                               }));
         assert_eq!(acl.apply_to_path(tmp_file_path), Ok(0));
@@ -450,6 +461,6 @@ fn test_add_and_remove_acl_entry() {
 
         assert_eq!(entry.sid, "S-1-1-0");
         assert_eq!(entry.mask, 0x001f01ff);
-        assert_eq!(entry.entryType, 0);
+        assert_eq!(entry.entryType, ACCESS_ALLOWED);
     }
 }

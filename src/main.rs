@@ -15,6 +15,9 @@ mod winffi;
 use mio::*;
 
 #[cfg(not(test))]
+use winffi::GENERIC_READ;
+
+#[cfg(not(test))]
 use mio::tcp::TcpListener;
 
 #[cfg(not(test))]
@@ -43,6 +46,41 @@ fn build_version() -> String {
     }
 
     format!("{}", prebuilt_ver)
+}
+
+#[cfg(all(windows, not(test)))]
+fn add_sid_profile_entry(path: &Path, sid: &str) -> bool {
+    // NOTE: Will this mess up for special unicode paths?
+    let result = acl::SimpleDacl::from_path(path.to_str().unwrap());
+    if let Err(x) = result {
+        error!("Failed to get ACL from {:?}: error={:}", path, x);
+        return false;
+    }
+
+    let mut dacl = result.unwrap();
+
+    if !dacl.add_entry(acl::AccessControlEntry {
+                           entryType: acl::ACCESS_ALLOWED,
+                           flags: 0,
+                           mask: GENERIC_READ,
+                           sid: sid.to_string(),
+                       }) {
+        error!("Failed to add AppContainer profile ACL entry from {:?}",
+               path);
+        return false;
+    }
+
+    match dacl.apply_to_path(path.to_str().unwrap()) {
+        Ok(_) => {
+            info!("  Added ACL entry for AppContainer profile in {:?}", path);
+        }
+        Err(x) => {
+            error!("Failed to set new ACL into {:?}: error={:}", path, x);
+            return false;
+        }
+    }
+
+    true
 }
 
 #[cfg(all(windows, not(test)))]
@@ -93,11 +131,20 @@ fn do_run(matches: &ArgMatches) {
     info!("AppContainer.enable_debug = {:}",
           matches.is_present("debug"));
 
-    // TODO: Add AppContainer SID to key and key's root directory
     let mut key_dir_path = key_path.clone();
     key_dir_path.pop();
 
-    println!("{:?}", key_dir_path);
+    if !add_sid_profile_entry(&key_dir_path, &profile.sid) {
+        error!("Failed to add AppContainer profile ACL entry into {:?}",
+               key_dir_path);
+        process::exit(-1);
+    }
+
+    if !add_sid_profile_entry(&key_path, &profile.sid) {
+        error!("Failed to add AppContainer profile ACL entry into {:?}",
+               key_path);
+        process::exit(-1);
+    }
 
     {
         const SERVER: Token = Token(0);
@@ -171,13 +218,47 @@ fn do_run(matches: &ArgMatches) {
 }
 
 #[cfg(all(windows, not(test)))]
+fn remove_sid_acl_entry(path: &Path, sid: &str) -> bool {
+    // NOTE: Will this mess up for special unicode paths?
+    let result = acl::SimpleDacl::from_path(path.to_str().unwrap());
+    if let Err(x) = result {
+        error!("Failed to get ACL from {:?}: error={:}", path, x);
+        return false;
+    }
+
+    let mut dacl = result.unwrap();
+
+    if !dacl.remove_entry(sid, acl::ACCESS_ALLOWED) {
+        error!("Failed to remove AppContainer profile ACL entry from {:?}",
+               path);
+        return false;
+    }
+
+    match dacl.apply_to_path(path.to_str().unwrap()) {
+        Ok(_) => {
+            info!("  Removed ACL entry for AppContainer profile in {:?}", path);
+        }
+        Err(x) => {
+            error!("Failed to set new ACL into {:?}: error={:}", path, x);
+            return false;
+        }
+    }
+
+    true
+}
+
+#[cfg(all(windows, not(test)))]
 fn do_clean(matches: &ArgMatches) {
     let profile_name = matches.value_of("profile").unwrap();
     println!("Removing AppContainer profile \"{:}\"", profile_name);
 
     if let Some(raw_key_path) = matches.value_of("key") {
-        let key_path = Path::new(raw_key_path);
+        let key_path = PathBuf::from(raw_key_path);
+        let mut key_dir_path = key_path.clone();
+        key_dir_path.pop();
+
         info!("  key_path = {:?}", key_path);
+        info!("  key_dir_path = {:?}", key_dir_path);
 
         if !key_path.exists() || key_path.is_dir() || !key_path.is_file() {
             error!("Specified key path ({:?}) is invalid", key_path);
@@ -196,28 +277,13 @@ fn do_clean(matches: &ArgMatches) {
             }
         };
 
-        // NOTE: Will this mess up with special unicode names?
-        match acl::SimpleDacl::from_path(key_path.to_str().unwrap()) {
-            Ok(mut dacl) => {
-                if !dacl.remove_entry(&profile.sid) {
-                    error!("Failed to remove AppContainer profile ACL entry from ACL!");
-                } else {
-                    // NOTE: Will this mess up with special unicode names?
-                    match dacl.apply_to_path(key_path.to_str().unwrap()) {
-                        Ok(_) => {
-                            println!("  Removed ACL entry for AppContainer profile in {:?}",
-                                     key_path);
-                        }
-                        Err(x) => {
-                            error!("Failed to set new ACL into {:?}: error={:}", key_path, x);
-                        }
-                    };
-                }
-            }
-            Err(x) => {
-                error!("Failed to get ACL from {:?}: error={:}", key_path, x);
-            }
-        };
+        if !remove_sid_acl_entry(&key_path, &profile.sid) {
+            error!("Failed to remove entry for key_path={:?}", key_path);
+        }
+
+        if !remove_sid_acl_entry(&key_dir_path, &profile.sid) {
+            error!("Failed to remove entry for key_dir_path={:?}", key_dir_path);
+        }
     }
 
     if !appcontainer::Profile::remove(profile_name) {
