@@ -192,16 +192,24 @@ impl SimpleDacl {
         true
     }
 
-    pub fn remove_entry(&mut self, sid: &str, entryType: ACL_ENTRY_TYPE) -> bool {
+    pub fn entry_exists(&self, sid: &str, entryType: ACL_ENTRY_TYPE) -> Option<usize> {
         let index = match self.entries
                   .iter()
                   .position(|x| x.sid == sid && x.entryType == entryType) {
             Some(x) => x,
-            _ => return false,
+            _ => return None,
         };
-        self.entries.remove(index);
 
-        true
+        Some(index)
+    }
+
+    pub fn remove_entry(&mut self, sid: &str, entryType: ACL_ENTRY_TYPE) -> bool {
+        if let Some(index) = self.entry_exists(sid, entryType) {
+            self.entries.remove(index);
+            return true;
+        }
+
+        false
     }
 
     pub fn apply_to_path(&self, path: &str) -> Result<usize, DWORD> {
@@ -306,6 +314,7 @@ fn test_add_remove_entry() {
                                flags: 0,
                            }));
     assert_eq!(acl.get_entries().iter().count(), 0);
+    assert!(acl.entry_exists(&String::from("S-1-1-0"), 5).is_none());
 
     assert!(acl.add_entry(AccessControlEntry {
                               sid: String::from("S-1-1-1"),
@@ -314,6 +323,8 @@ fn test_add_remove_entry() {
                               flags: 0,
                           }));
     assert_eq!(acl.get_entries().iter().count(), 1);
+    assert!(acl.entry_exists(&String::from("S-1-1-1"), ACCESS_DENIED)
+                .is_some());
 
     // Duplicate SID entry added
     assert!(!acl.add_entry(AccessControlEntry {

@@ -59,6 +59,13 @@ fn add_sid_profile_entry(path: &Path, sid: &str) -> bool {
 
     let mut dacl = result.unwrap();
 
+    if dacl.entry_exists(sid, acl::ACCESS_ALLOWED).is_some() {
+        if !dacl.remove_entry(sid, acl::ACCESS_ALLOWED) {
+            error!("Failed to remove existing ACL entry for AppContainer SID");
+            return false;
+        }
+    }
+
     if !dacl.add_entry(acl::AccessControlEntry {
                            entryType: acl::ACCESS_ALLOWED,
                            flags: 0,

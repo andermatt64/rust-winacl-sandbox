@@ -238,7 +238,7 @@ impl Profile {
                                         cmdLine.as_mut_ptr(),
                                         0 as LPSECURITY_ATTRIBUTES,
                                         0 as LPSECURITY_ATTRIBUTES,
-                                        0,
+                                        1,
                                         dwCreationFlags,
                                         0 as LPVOID,
                                         currentDir.as_ptr(),
