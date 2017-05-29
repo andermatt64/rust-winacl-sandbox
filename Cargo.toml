@@ -2,6 +2,10 @@
 name = "rust-winacl-sandbox"
 version = "0.1.0"
 authors = ["andermatt64"]
+build = "build.rs"
+
+[build-dependencies]
+vergen = "0.1.1"
 
 [dependencies]
 winapi = "0.2"
@@ -10,3 +14,6 @@ field-offset = "0.1.1"
 libc = "0.2.22"
 widestring = "0.2.2"
 tempdir = "0.3.5"
+clap = "2.24.2"
+log = "0.3.8"
+env_logger = "0.4.3"

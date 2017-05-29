@@ -1,7 +1,7 @@
 # TODOs
-* Split AppContainerProfile and SimpleDacl into separate files
-* Create unit tests for:
-  * AppContainerProfile and SimpleDacl
+* (DONE) Split AppContainerProfile and SimpleDacl into separate files
+* (DONE) Create unit tests for:
+  * (DONE) AppContainerProfile and SimpleDacl
 * Find an async IO framework that can setup a server socket over TCP
   * Figure out how to convert their sockets into raw Windows SOCKET
 * Use clap-rs for argument parsing

@@ -14,8 +14,8 @@ extern crate tempdir;
 use super::winffi;
 
 use super::winffi::{SECURITY_DESCRIPTOR_REVISION, PACE_HEADER, ACCESS_ALLOWED_ACE,
-                    ACCESS_DENIED_ACE, SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION, GENERIC_ALL,
-                    GENERIC_READ, GENERIC_WRITE, string_to_sid, sid_to_string};
+                    ACCESS_DENIED_ACE, SECURITY_DESCRIPTOR_MIN_LENGTH, ACL_REVISION,
+                    string_to_sid, sid_to_string};
 use self::winapi::{PSECURITY_DESCRIPTOR, PACL, DACL_SECURITY_INFORMATION, PSID, ACL, DWORD,
                    LPVOID, BOOL};
 use std::ffi::OsStr;
@@ -23,14 +23,23 @@ use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 use std::iter::once;
 use std::mem;
+
+#[cfg(test)]
+use super::winffi::{GENERIC_ALL, GENERIC_READ, GENERIC_WRITE};
+
+#[cfg(test)]
 use std::fs::File;
+
+#[cfg(test)]
+use self::tempdir::TempDir;
+
+#[cfg(test)]
 use std::io::prelude::*;
 
 #[allow(unused_imports)]
 use self::field_offset::*;
 
-#[cfg(test)]
-use self::tempdir::TempDir;
+
 
 #[allow(dead_code)]
 pub struct AccessControlEntry {
@@ -40,6 +49,7 @@ pub struct AccessControlEntry {
     sid: String,
 }
 
+#[allow(dead_code)]
 fn get_dacl(path: &str) -> Result<(Vec<u8>, PACL), DWORD> {
     let wPath: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
     let mut bufSize: DWORD = 0;
@@ -107,11 +117,11 @@ pub struct SimpleDacl {
 
 #[allow(dead_code)]
 impl SimpleDacl {
-    fn new() -> SimpleDacl {
+    pub fn new() -> SimpleDacl {
         SimpleDacl { entries: Vec::new() }
     }
 
-    fn from_path(path: &str) -> Result<SimpleDacl, DWORD> {
+    pub fn from_path(path: &str) -> Result<SimpleDacl, DWORD> {
         #[allow(unused_variables)]
         let (securityDesc, pDacl) = get_dacl(path)?;
 
@@ -133,11 +143,11 @@ impl SimpleDacl {
         Ok(SimpleDacl { entries: entries })
     }
 
-    fn get_entries(&self) -> &Vec<AccessControlEntry> {
+    pub fn get_entries(&self) -> &Vec<AccessControlEntry> {
         &self.entries
     }
 
-    fn add_entry(&mut self, entry: AccessControlEntry) -> bool {
+    pub fn add_entry(&mut self, entry: AccessControlEntry) -> bool {
         let target: usize;
         match entry.entryType {
             0 => {
@@ -176,7 +186,7 @@ impl SimpleDacl {
         true
     }
 
-    fn remove_entry(&mut self, sid: &str) -> bool {
+    pub fn remove_entry(&mut self, sid: &str) -> bool {
         let index = match self.entries.iter().position(|x| x.sid == sid) {
             Some(x) => x,
             _ => return false,
@@ -186,7 +196,7 @@ impl SimpleDacl {
         true
     }
 
-    fn apply_to_path(&self, path: &str) -> Result<usize, DWORD> {
+    pub fn apply_to_path(&self, path: &str) -> Result<usize, DWORD> {
         let wPath: Vec<u16> = OsStr::new(path).encode_wide().chain(once(0)).collect();
         let mut securityDesc: Vec<u8> = Vec::with_capacity(SECURITY_DESCRIPTOR_MIN_LENGTH);
 

@@ -20,13 +20,21 @@ use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID
                    PVOID, PSECURITY_CAPABILITIES, STARTUPINFOW, LPSTARTUPINFOW, HANDLE, WORD,
                    LPBYTE, STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE,
                    ERROR_FILE_NOT_FOUND, PROCESS_INFORMATION, EXTENDED_STARTUPINFO_PRESENT,
-                   LPSECURITY_ATTRIBUTES, INFINITE, WAIT_OBJECT_0};
-use std::path::{Path, PathBuf};
+                   LPSECURITY_ATTRIBUTES};
+use std::path::Path;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::iter::once;
 use std::mem;
+
+#[cfg(test)]
 use std::env;
+
+#[cfg(test)]
+use std::path::PathBuf;
+
+#[cfg(test)]
+use self::winapi::{INFINITE, WAIT_OBJECT_0};
 
 #[allow(dead_code)]
 pub struct Profile {
@@ -34,18 +42,20 @@ pub struct Profile {
     childPath: String,
     outboundNetwork: bool,
     debug: bool,
-    sid: String,
+    pub sid: String,
 }
 
+#[allow(dead_code)]
 impl Profile {
-    fn new(profile: &str, path: &str) -> Result<Profile, HRESULT> {
+    pub fn new(profile: &str, path: &str) -> Result<Profile, HRESULT> {
         let mut pSid: PSID = 0 as PSID;
         let profile_name: Vec<u16> = OsStr::new(profile)
             .encode_wide()
             .chain(once(0))
             .collect();
 
-        if !Path::new(path).exists() {
+        let path_obj = Path::new(path);
+        if !path_obj.exists() || !path_obj.is_file() {
             return Err(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
         }
 
@@ -79,7 +89,7 @@ impl Profile {
            })
     }
 
-    fn remove(profile: &str) -> bool {
+    pub fn remove(profile: &str) -> bool {
         let profile_name: Vec<u16> = OsStr::new(profile)
             .encode_wide()
             .chain(once(0))
@@ -98,15 +108,15 @@ impl Profile {
         false
     }
 
-    fn enable_outbound_network(&mut self, has_outbound_network: bool) {
+    pub fn enable_outbound_network(&mut self, has_outbound_network: bool) {
         self.outboundNetwork = has_outbound_network;
     }
 
-    fn enable_debug(&mut self, is_debug: bool) {
+    pub fn enable_debug(&mut self, is_debug: bool) {
         self.debug = is_debug;
     }
 
-    fn launch(&self, client: SOCKET, dirPath: &str) -> Result<HandlePtr, DWORD> {
+    pub fn launch(&self, client: SOCKET, dirPath: &str) -> Result<HandlePtr, DWORD> {
         let network_allow_sid = match string_to_sid("S-1-15-3-1") {
             Ok(x) => x,
             Err(_) => return Err(0xffffffff),
