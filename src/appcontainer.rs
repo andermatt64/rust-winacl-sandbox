@@ -311,7 +311,6 @@ fn test_appcontainer() {
     let dir_path = child_path.clone();
     child_path.push("sandbox-test.exe");
 
-    Profile::remove("default_appjail");
     if let Ok(mut profile) = Profile::new("default_appjail", child_path.to_str().unwrap()) {
         {
             let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
