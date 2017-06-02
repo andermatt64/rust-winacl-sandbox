@@ -13,14 +13,14 @@ use super::winffi;
 
 use super::winffi::{HRESULT_FROM_WIN32, SE_GROUP_ENABLED, string_to_sid, sid_to_string,
                     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTUPINFOEXW, LPSTARTUPINFOEXW,
-                    HandlePtr};
-use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, SOCKET, PSID_AND_ATTRIBUTES, SID_AND_ATTRIBUTES,
-                   ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT, SECURITY_CAPABILITIES,
-                   LPPROC_THREAD_ATTRIBUTE_LIST, PPROC_THREAD_ATTRIBUTE_LIST, SIZE_T, PSIZE_T,
-                   PVOID, PSECURITY_CAPABILITIES, STARTUPINFOW, LPSTARTUPINFOW, HANDLE, WORD,
-                   LPBYTE, STARTF_USESTDHANDLES, STARTF_USESHOWWINDOW, SW_HIDE,
-                   ERROR_FILE_NOT_FOUND, PROCESS_INFORMATION, EXTENDED_STARTUPINFO_PRESENT,
-                   LPSECURITY_ATTRIBUTES};
+                    HandlePtr, HANDLE_FLAG_INHERIT};
+use self::winapi::{DWORD, LPVOID, LPWSTR, PSID, INVALID_HANDLE_VALUE, PSID_AND_ATTRIBUTES,
+                   SID_AND_ATTRIBUTES, ERROR_SUCCESS, ERROR_ALREADY_EXISTS, HRESULT,
+                   SECURITY_CAPABILITIES, LPPROC_THREAD_ATTRIBUTE_LIST,
+                   PPROC_THREAD_ATTRIBUTE_LIST, SIZE_T, PSIZE_T, PVOID, PSECURITY_CAPABILITIES,
+                   STARTUPINFOW, LPSTARTUPINFOW, HANDLE, WORD, LPBYTE, STARTF_USESTDHANDLES,
+                   STARTF_USESHOWWINDOW, SW_HIDE, ERROR_FILE_NOT_FOUND, PROCESS_INFORMATION,
+                   EXTENDED_STARTUPINFO_PRESENT, LPSECURITY_ATTRIBUTES};
 use std::path::Path;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
@@ -116,7 +116,7 @@ impl Profile {
         self.debug = is_debug;
     }
 
-    pub fn launch(&self, client: SOCKET, dirPath: &str) -> Result<HandlePtr, DWORD> {
+    pub fn launch(&self, client: HANDLE, dirPath: &str) -> Result<HandlePtr, DWORD> {
         let network_allow_sid = match string_to_sid("S-1-15-3-1") {
             Ok(x) => x,
             Err(_) => return Err(0xffffffff),
@@ -209,11 +209,17 @@ impl Profile {
 
         si.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
 
-        if (client as DWORD) != 0xffffffff {
+        // TODO: Make 0xffffffff -> INVALID_HANDLE_VALUE
+        if client != INVALID_HANDLE_VALUE {
             si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
             si.StartupInfo.hStdInput = client as HANDLE;
             si.StartupInfo.hStdOutput = client as HANDLE;
             si.StartupInfo.hStdError = client as HANDLE;
+
+            // Ensure the handle is inheritable
+            if unsafe { kernel32::SetHandleInformation(client, HANDLE_FLAG_INHERIT, 1) } == 0 {
+                return Err(unsafe { kernel32::GetLastError() });
+            }
         }
 
         si.StartupInfo.wShowWindow = SW_HIDE as WORD;
@@ -323,7 +329,7 @@ fn test_appcontainer() {
 
     if let Ok(mut profile) = Profile::new("default_appjail", child_path.to_str().unwrap()) {
         {
-            let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
+            let launch_result = profile.launch(INVALID_HANDLE_VALUE, dir_path.to_str().unwrap());
             assert!(launch_result.is_ok());
 
             let hProcess = launch_result.unwrap();
@@ -343,7 +349,7 @@ fn test_appcontainer() {
         profile.enable_outbound_network(false);
 
         {
-            let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
+            let launch_result = profile.launch(INVALID_HANDLE_VALUE, dir_path.to_str().unwrap());
             assert!(launch_result.is_ok());
 
             let hProcess = launch_result.unwrap();
@@ -364,7 +370,7 @@ fn test_appcontainer() {
         profile.enable_debug(true);
 
         {
-            let launch_result = profile.launch(0xffffffff as SOCKET, dir_path.to_str().unwrap());
+            let launch_result = profile.launch(INVALID_HANDLE_VALUE, dir_path.to_str().unwrap());
             assert!(launch_result.is_ok());
 
             let hProcess = launch_result.unwrap();
@@ -384,5 +390,59 @@ fn test_appcontainer() {
         Profile::remove("default_appjail");
     } else {
         assert!(false);
+    }
+}
+
+#[test]
+fn test_stdout_redirect() {
+    let result = get_unittest_support_path();
+    assert!(!result.is_none());
+
+    let mut child_path = result.unwrap();
+    let dir_path = child_path.clone();
+    child_path.push("greenhornd.exe");
+
+    let raw_profile = Profile::new("default_appjail", child_path.to_str().unwrap());
+    assert!(raw_profile.is_ok());
+
+    let mut profile = raw_profile.unwrap();
+
+    let mut rChildStdin: HANDLE = 0 as HANDLE;
+    let mut wChildStdin: HANDLE = 0 as HANDLE;
+    let mut rChildStdout: HANDLE = 0 as HANDLE;
+    let mut wChildStdout: HANDLE = 0 as HANDLE;
+
+    let mut saAttr = winapi::SECURITY_ATTRIBUTES {
+        nLength: mem::size_of::<winapi::SECURITY_ATTRIBUTES>() as DWORD,
+        lpSecurityDescriptor: 0 as LPVOID,
+        bInheritHandle: 1,
+    };
+
+    assert!(unsafe {
+                kernel32::CreatePipe(&mut rChildStdout, &mut wChildStdout, &mut saAttr, 0)
+            } != 0);
+    assert!(unsafe {
+                kernel32::CreatePipe(&mut rChildStdin, &mut wChildStdout, &mut saAttr, 0)
+            } != 0);
+
+    //assert!(unsafe { kernel32::SetHandleInformation(rChildStdout, HANDLE_FLAG_INHERIT, 0) } != 0);
+    //assert!(unsafe { kernel32::SetHandleInformation(wChildStdin, HANDLE_FLAG_INHERIT, 0) } != 0);
+
+    {
+        let launch_result = profile.launch(wChildStdout, dir_path.to_str().unwrap());
+        assert!(launch_result.is_ok());
+
+        let hProcess = launch_result.unwrap();
+
+        let mut dwRead: DWORD = 0 as DWORD;
+        let mut buffer: Vec<u8> = Vec::with_capacity(256);
+        assert!(unsafe {
+                    kernel32::ReadFile(rChildStdout,
+                                       buffer.as_mut_ptr() as LPVOID,
+                                       256,
+                                       &mut dwRead,
+                                       mem::transmute::<usize, *mut winapi::OVERLAPPED>(0))
+                } != 0);
+        println!("{:?}", buffer);
     }
 }

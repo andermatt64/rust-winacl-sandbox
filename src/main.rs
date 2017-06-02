@@ -26,6 +26,9 @@ use std::process;
 #[cfg(all(not(test), windows))]
 use std::os::windows::io::AsRawSocket;
 
+#[cfg(all(not(test), windows))]
+use winapi::HANDLE;
+
 #[cfg(not(test))]
 use std::path::{Path, PathBuf};
 
@@ -204,7 +207,8 @@ fn do_run(matches: &ArgMatches) {
                                   client_addr);
 
                             // NOTE: Watch out for the unwrap()
-                            match profile.launch(raw_socket, key_dir_abspath.to_str().unwrap()) {
+                            match profile.launch(raw_socket as HANDLE,
+                                                 key_dir_abspath.to_str().unwrap()) {
                                 Ok(x) => {
                                     info!("     Launched new process with handle {:?} with current_dir = {:?}",
                                           x.raw,
