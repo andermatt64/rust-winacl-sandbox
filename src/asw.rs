@@ -4,10 +4,16 @@
 #![allow(dead_code)]
 #![cfg(windows)]
 
+extern crate libc;
 extern crate winapi;
 extern crate ws2_32;
 extern crate kernel32;
+extern crate widestring;
 
+#[allow(unused_imports)]
+use log::*;
+
+use self::widestring::WideString;
 use std::mem;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
@@ -152,10 +158,36 @@ impl TcpServer {
                                &mut sinSize)
             };
         if clientSocket == INVALID_SOCKET {
+            debug!("Invalid client socket: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
             return None;
         }
 
-        // TODO: Parse SOCKADDR_IN for client to get IP and port
+        let mut buffer: Vec<u16> = Vec::with_capacity(16);
+
+        let ret = unsafe {
+            ws2_32::InetNtopW(clientAddr.sin_family as INT,
+                              mem::transmute::<&mut in_addr, LPVOID>(&mut clientAddr.sin_addr),
+                              buffer.as_mut_ptr(),
+                              16)
+        };
+        if ret == 0 as PCWSTR {
+            debug!("Failed to convert client IP addr to string: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
+            return None;
+        }
+
+        // TODO: Clean this shit up
+        unsafe {
+            let p = buffer.as_mut_ptr();
+            mem::forget(buffer);
+            let size = libc::wcslen(p);
+            println!("Client addr = {:}:{:}",
+                     WideString::from_ptr(p, size).to_string_lossy(),
+                     clientAddr.sin_port);
+
+        }
+
         Some(TcpClient::from_accept(clientSocket))
     }
 

@@ -8,6 +8,9 @@ extern crate kernel32;
 extern crate field_offset;
 extern crate libc;
 
+#[allow(unused_imports)]
+use log::*;
+
 #[cfg(test)]
 extern crate tempdir;
 

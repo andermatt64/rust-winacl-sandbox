@@ -8,7 +8,10 @@ extern crate kernel32;
 extern crate field_offset;
 extern crate libc;
 extern crate widestring;
+extern crate log;
 
+#[allow(unused_imports)]
+use log::*;
 use super::winffi;
 
 use super::winffi::{HRESULT_FROM_WIN32, SE_GROUP_ENABLED, string_to_sid, sid_to_string,
@@ -332,8 +335,12 @@ fn test_appcontainer() {
     let dir_path = child_path.clone();
     child_path.push("sandbox-test.exe");
 
+    println!("dir_path = {:?}", dir_path);
+    println!("Attempting to create default_appjail AppContainer profile...");
+
     if let Ok(mut profile) = Profile::new("default_appjail", child_path.to_str().unwrap()) {
         {
+            println!("Testing with default privileges");
             let launch_result = profile.launch(INVALID_HANDLE_VALUE,
                                                INVALID_HANDLE_VALUE,
                                                dir_path.to_str().unwrap());
@@ -353,9 +360,11 @@ fn test_appcontainer() {
             assert!((dwExitCode & REGISTRY_WRITE_MASK) != 0);
         }
 
+        println!("Disabling outbound network connections");
         profile.enable_outbound_network(false);
 
         {
+            println!("Testing without outbound network connections");
             let launch_result = profile.launch(INVALID_HANDLE_VALUE,
                                                INVALID_HANDLE_VALUE,
                                                dir_path.to_str().unwrap());
@@ -375,10 +384,14 @@ fn test_appcontainer() {
             assert!((dwExitCode & REGISTRY_WRITE_MASK) != 0);
         }
 
+        println!("Enabling outbound network connections");
         profile.enable_outbound_network(true);
+
+        println!("Disabling AppContainer");
         profile.enable_debug(true);
 
         {
+            println!("Testing debug mode");
             let launch_result = profile.launch(INVALID_HANDLE_VALUE,
                                                INVALID_HANDLE_VALUE,
                                                dir_path.to_str().unwrap());
@@ -400,6 +413,7 @@ fn test_appcontainer() {
 
         Profile::remove("default_appjail");
     } else {
+        println!("Failed to create AppContainer profile");
         assert!(false);
     }
 }
@@ -429,6 +443,7 @@ fn test_stdout_redirect() {
         bInheritHandle: 0,
     };
 
+    println!("Creating stdin/stdout anonymous pipes");
     assert!(unsafe {
                 kernel32::CreatePipe(&mut rChildStdout, &mut wChildStdout, &mut saAttr, 0)
             } != 0);
@@ -437,6 +452,7 @@ fn test_stdout_redirect() {
             } != 0);
 
     {
+        println!("Launching AppContainer with redirected stdin/stdout/stderr");
         let launch_result = profile.launch(rChildStdin, wChildStdout, dir_path.to_str().unwrap());
         assert!(launch_result.is_ok());
 
@@ -444,6 +460,8 @@ fn test_stdout_redirect() {
 
         let mut dwRead: DWORD = 0 as DWORD;
         let mut buffer: Vec<u8> = Vec::with_capacity(37);
+
+        println!("Reading 37 bytes for testing");
         assert!(unsafe {
                     kernel32::ReadFile(rChildStdout,
                                        buffer.as_mut_ptr() as LPVOID,
@@ -463,7 +481,10 @@ fn test_stdout_redirect() {
         let result = String::from_utf8(data);
         assert!(result.is_ok());
 
-        assert_eq!(result.unwrap(), "Wecome to the Greenhorn CSAW service!");
+        let read_data = result.unwrap();
+
+        println!("Read bytes: {:?}", &read_data);
+        assert_eq!(read_data, "Wecome to the Greenhorn CSAW service!");
         assert!(unsafe { kernel32::TerminateProcess(hProcess.raw, 0xffffffff) } != 0);
     }
 }

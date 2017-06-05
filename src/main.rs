@@ -1,5 +1,6 @@
 extern crate clap;
 extern crate env_logger;
+#[macro_use()]
 extern crate log;
 extern crate winapi;
 
@@ -146,9 +147,10 @@ fn do_run(matches: &ArgMatches) {
     }
 
     {
-        // TODO: document me
         let key_dir_abspath = key_dir_path.canonicalize().unwrap();
+        info!("key_dir_abspath = {:?}", key_dir_abspath);
 
+        info!("Attempting to bind to port {:}", port);
         let server = match asw::TcpServer::bind(port) {
             Ok(x) => x,
             Err(x) => {
@@ -156,6 +158,8 @@ fn do_run(matches: &ArgMatches) {
                 process::exit(-1);
             }
         };
+
+        println!("Listening for clients on port {:}", port);
 
         loop {
             match server.get_event() {

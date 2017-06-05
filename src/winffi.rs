@@ -9,6 +9,9 @@ extern crate kernel32;
 extern crate libc;
 extern crate widestring;
 
+#[allow(unused_imports)]
+use log::*;
+
 use self::widestring::WideString;
 use self::winapi::*;
 use std::ffi::OsStr;
@@ -49,7 +52,7 @@ pub fn HRESULT_FROM_WIN32(code: DWORD) -> HRESULT {
     }
 }
 
-// Copied from winapi-rs
+// Copied from winapi-rs since we are having issues with macro-use
 macro_rules! DEF_STRUCT {
     {$(#[$attrs:meta])* nodebug struct $name:ident { $($field:ident: $ftype:ty,)+ }} => {
         #[repr(C)] $(#[$attrs])*
@@ -69,32 +72,7 @@ macro_rules! DEF_STRUCT {
     };
 }
 
-// Copied from winapi-rs
-macro_rules! DEF_ENUM {
-    {enum $name:ident { $($variant:ident = $value:expr,)+ }} => {
-        pub type $name = u32;
-        $(pub const $variant: $name = $value;)+
-    };
-    {enum $name:ident { $variant:ident = $value:expr, $($rest:tt)* }} => {
-        pub type $name = u32;
-        pub const $variant: $name = $value;
-        DEF_ENUM!{@gen $name $variant, $($rest)*}
-    };
-    {enum $name:ident { $variant:ident, $($rest:tt)* }} => {
-        DEF_ENUM!{enum $name { $variant = 0, $($rest)* }}
-    };
-    {@gen $name:ident $base:ident,} => {};
-    {@gen $name:ident $base:ident, $variant:ident = $value:expr, $($rest:tt)*} => {
-        pub const $variant: $name = $value;
-        DEF_ENUM!{@gen $name $variant, $($rest)*}
-    };
-    {@gen $name:ident $base:ident, $variant:ident, $($rest:tt)*} => {
-        pub const $variant: $name = $base + 1u32;
-        DEF_ENUM!{@gen $name $variant, $($rest)*}
-    };
-}
-
-DEF_ENUM!{enum ACL_INFORMATION_CLASS {
+ENUM!{enum ACL_INFORMATION_CLASS {
     AclRevisionInformation = 1,
     AclSizeInformation,
 }}
