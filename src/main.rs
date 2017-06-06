@@ -223,7 +223,7 @@ fn remove_sid_acl_entry(path: &Path, sid: &str) -> bool {
 
 #[cfg(all(windows, not(test)))]
 fn do_clean(matches: &ArgMatches) {
-    let profile_name = matches.value_of("profile").unwrap();
+    let profile_name = matches.value_of("name").unwrap();
     println!("Removing AppContainer profile \"{:}\"", profile_name);
 
     if let Some(raw_key_path) = matches.value_of("key") {
@@ -251,10 +251,14 @@ fn do_clean(matches: &ArgMatches) {
             }
         };
 
+        info!("Removing ACL entry for {:} in {:?}", profile.sid, key_path);
         if !remove_sid_acl_entry(&key_path, &profile.sid) {
             error!("Failed to remove entry for key_path={:?}", key_path);
         }
 
+        info!("Removing ACL entry for {:} in {:?}",
+              profile.sid,
+              key_dir_path);
         if !remove_sid_acl_entry(&key_dir_path, &profile.sid) {
             error!("Failed to remove entry for key_dir_path={:?}", key_dir_path);
         }
@@ -315,12 +319,12 @@ fn main() {
                      .long("name")
                      .value_name("NAME")
                      .default_value("default_appjail_profile")
-                     .help("AppContainer profile name")))
+                     .help("AppContainer profile name"))
             .arg(Arg::with_name("key")
                      .short("k")
                      .long("key")
                      .value_name("KEYFILE")
-                     .help("The path to the \"key\" file that contains the challenge solution token"))
+                     .help("The path to the \"key\" file that contains the challenge solution token")))
         .get_matches();
 
     if let Err(_) = env_logger::init() {
