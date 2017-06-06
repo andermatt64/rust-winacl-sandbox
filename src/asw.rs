@@ -80,6 +80,8 @@ impl TcpServer {
 
         ret = unsafe { ws2_32::GetAddrInfoW(0 as PCWSTR, wszPort.as_ptr(), &hints, &mut servinfo) };
         if ret != 0 {
+            debug!("GetAddrInfoW failed: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
             return Err(ret as DWORD);
         }
 
@@ -92,6 +94,8 @@ impl TcpServer {
                                0)
         };
         if socket == INVALID_SOCKET {
+            debug!("WSASocketW failed: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
             return Err(unsafe { ws2_32::WSAGetLastError() as DWORD });
         }
 
@@ -103,6 +107,8 @@ impl TcpServer {
             },
         };
         if server.hAccept == WSA_INVALID_EVENT {
+            debug!("CreateEventW failed: GLE={:}",
+                   unsafe { kernel32::GetLastError() });
             return Err(unsafe { ws2_32::WSAGetLastError() } as DWORD);
         }
 
@@ -117,26 +123,35 @@ impl TcpServer {
                                mem::size_of::<DWORD>() as i32)
         };
         if ret != 0 {
+            debug!("setsockopt SO_REUSEADDR failed: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
             return Err(ret as DWORD);
         }
 
         ret = unsafe { ws2_32::bind(socket, (*servinfo).ai_addr, (*servinfo).ai_addrlen as i32) };
         if ret == -1 {
+            debug!("bind failed: GLE={:}", unsafe { ws2_32::WSAGetLastError() });
             return Err(ret as DWORD);
         }
 
         ret = unsafe { ws2_32::listen(socket, 5) };
         if ret != 0 {
+            debug!("listen failed: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
             return Err(ret as DWORD);
         }
 
         ret = unsafe { ws2_32::WSAEventSelect(socket, server.hAccept, FD_ACCEPT) };
         if ret == SOCKET_ERROR {
+            debug!("WSAEventSelect failed: GLE={:}",
+                   unsafe { ws2_32::WSAGetLastError() });
             return Err(unsafe { ws2_32::WSAGetLastError() } as DWORD);
         }
 
         if unsafe { kernel32::SetHandleInformation(socket as HANDLE, HANDLE_FLAG_INHERIT, 0) } ==
            0 {
+            debug!("Failed to SetHandleInformation: GLE={:}",
+                   unsafe { kernel32::GetLastError() });
             return Err(unsafe { kernel32::GetLastError() });
         }
 
@@ -148,7 +163,7 @@ impl TcpServer {
         TcpServerEvent::Token(self.eventList.len() - 1)
     }
 
-    pub fn accept(&self) -> Option<TcpClient> {
+    pub fn accept(&self) -> Option<(TcpClient, String)> {
         let mut clientAddr: SOCKADDR_IN = unsafe { mem::zeroed() };
         let mut sinSize: i32 = mem::size_of::<SOCKADDR_IN>() as i32;
         let clientSocket: SOCKET =
@@ -177,18 +192,15 @@ impl TcpServer {
             return None;
         }
 
-        // TODO: Clean this shit up
-        unsafe {
-            let p = buffer.as_mut_ptr();
+        let clientAddrPair = unsafe {
             mem::forget(buffer);
-            let size = libc::wcslen(p);
-            println!("Client addr = {:}:{:}",
-                     WideString::from_ptr(p, size).to_string_lossy(),
-                     clientAddr.sin_port);
+            let size = libc::wcslen(ret);
+            format!("{}:{}",
+                    WideString::from_ptr(ret, size).to_string_lossy(),
+                    clientAddr.sin_port)
+        };
 
-        }
-
-        Some(TcpClient::from_accept(clientSocket))
+        Some((TcpClient::from_accept(clientSocket), clientAddrPair))
     }
 
     pub fn get_event(&self) -> TcpServerEvent {

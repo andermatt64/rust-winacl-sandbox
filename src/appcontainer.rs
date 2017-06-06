@@ -158,7 +158,11 @@ impl Profile {
         let mut dwCreationFlags: DWORD = 0 as DWORD;
 
         if !self.debug {
+            debug!("Setting up AppContainer");
+
             if self.outboundNetwork {
+                debug!("Setting up SID_AND_ATTRIBUTES for outbound network permissions");
+
                 attrs = SID_AND_ATTRIBUTES {
                     Sid: network_allow_sid.raw_ptr,
                     Attributes: SE_GROUP_ENABLED,
@@ -176,6 +180,8 @@ impl Profile {
                                                                &mut listSize)
                } !=
                0 {
+                debug!("InitializeProcThreadAttributeList failed: GLE={:}",
+                       unsafe { kernel32::GetLastError() });
                 return Err(unsafe { kernel32::GetLastError() });
             }
 
@@ -188,6 +194,8 @@ impl Profile {
                                                                &mut listSize)
                } ==
                0 {
+                debug!("InitializeProcThreadAttributeList failed: GLE={:}",
+                       unsafe { kernel32::GetLastError() });
                 return Err(unsafe { kernel32::GetLastError() });
             }
 
@@ -199,6 +207,7 @@ impl Profile {
                                                     mem::size_of::<SECURITY_CAPABILITIES>() as SIZE_T, 
                                                     0 as PVOID, 
                                                     0 as PSIZE_T) } == 0 {
+                debug!("UpdateProcThreadAttribute failed: GLE={:}", unsafe { kernel32::GetLastError() });
                 return Err(unsafe { kernel32::GetLastError() })
             }
 
@@ -207,6 +216,7 @@ impl Profile {
 
             dwCreationFlags |= EXTENDED_STARTUPINFO_PRESENT;
         } else {
+            debug!("Debug mode -- no extended STARTUPINFO");
             si.StartupInfo.cb = mem::size_of::<STARTUPINFOW>() as DWORD;
         }
 
@@ -259,8 +269,12 @@ impl Profile {
                                         mem::transmute::<LPSTARTUPINFOEXW, LPSTARTUPINFOW>(&mut si),
                                         &mut pi)
            } == 0 {
+            debug!("CreateProcess failed: GLE={:}",
+                   unsafe { kernel32::GetLastError() });
             return Err(unsafe { kernel32::GetLastError() });
         }
+
+        debug!("  Child PID = {:}", pi.dwProcessId);
 
         unsafe { kernel32::CloseHandle(pi.hThread) };
 
@@ -428,6 +442,9 @@ fn test_stdout_redirect() {
     child_path.push("greenhornd.exe");
 
     let raw_profile = Profile::new("default_appjail", child_path.to_str().unwrap());
+    if let Err(x) = raw_profile {
+        println!("GLE={:}", x);
+    }
     assert!(raw_profile.is_ok());
 
     let profile = raw_profile.unwrap();

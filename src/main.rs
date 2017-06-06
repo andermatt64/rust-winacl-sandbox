@@ -108,7 +108,6 @@ fn do_run(matches: &ArgMatches) {
     info!("  tcp server port = {:}", port);
 
     let profile_name = matches.value_of("name").unwrap();
-    info!("  profile name = {:?}", profile_name);
 
     // NOTE: Will special unicode paths mess up this unwrap()?
     let mut profile = match appcontainer::Profile::new(profile_name,
@@ -121,7 +120,8 @@ fn do_run(matches: &ArgMatches) {
             process::exit(-1);
         }
     };
-    info!("profile name = {:}, sid = {:}", profile_name, profile.sid);
+    info!("  profile name = {:}", profile_name);
+    info!("  sid = {:}", profile.sid);
 
     profile.enable_outbound_network(matches.is_present("outbound"));
     info!("AppContainer.enable_outbound_network_conn = {:}",
@@ -166,7 +166,7 @@ fn do_run(matches: &ArgMatches) {
                 asw::TcpServerEvent::Accept => {
                     let raw_client = server.accept();
                     if raw_client.is_some() {
-                        let client = raw_client.unwrap();
+                        let (client, addr) = raw_client.unwrap();
                         let raw_socket = client.raw_handle();
 
                         match profile.launch(raw_socket as HANDLE,
@@ -176,6 +176,7 @@ fn do_run(matches: &ArgMatches) {
                                 info!("     Launched new process with handle {:?} with current_dir = {:?}",
                                       x.raw,
                                       key_dir_path);
+                                println!(" + Accepted new client connection from {:}", addr);
                             }
                             Err(x) => {
                                 error!("     Failed to launch new process: error={:}", x);
